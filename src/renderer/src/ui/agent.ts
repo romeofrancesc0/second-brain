@@ -1,0 +1,532 @@
+import { DEFAULT_AI, type AgentEvent, type AgentToolCall, type AiSettings, type AiStatus, type DiffLine, type IndexStatus } from '@shared/types'
+import { icons } from './icons'
+import { decorateCallouts, renderMarkdown } from './markdown'
+
+export interface AgentPanelHost {
+  /** Resolves a [[target]] written by the model to a node id. */
+  resolve(target: string): string | null
+  exists(id: string): boolean
+  openNote(id: string): void
+  focusNodes(ids: string[]): void
+  onActivity(ids: string[], follow: boolean): void
+  onClear(): void
+  onToggle(open: boolean): void
+}
+
+type Segment =
+  | { kind: 'text'; text: string; el: HTMLElement }
+  | { kind: 'reasoning'; text: string; el: HTMLElement }
+  | { kind: 'tool'; el: HTMLElement }
+  | { kind: 'other'; el: HTMLElement }
+
+const SUGGESTIONS = [
+  'Riassumi i concetti principali di Fisica II',
+  'Che collegamenti mancano alla nota Trasformata Z?',
+  'Come sono collegati Machine learning e BigData nel mio vault?',
+  'Quali note parlano di regione di convergenza?'
+]
+
+const PROVIDERS: { id: AiSettings['provider']; label: string; url: string }[] = [
+  { id: 'ollama', label: 'Ollama', url: 'http://localhost:11434' },
+  { id: 'openai', label: 'LM Studio / server compatibile OpenAI', url: 'http://localhost:1234/v1' }
+]
+
+/** Chat with the local AI agent, plus its settings. */
+export class AgentPanel {
+  private settings: AiSettings = { ...DEFAULT_AI }
+  private status: AiStatus | null = null
+  private index: IndexStatus | null = null
+  private running = false
+  private segments: Segment[] = []
+  private message: HTMLElement | null = null
+  private tools = new Map<string, { call: AgentToolCall; el: HTMLElement }>()
+  private renderQueued = new Set<Segment>()
+  private saveTimer: number | undefined
+  private messagesEl: HTMLElement
+  private input: HTMLTextAreaElement
+  private sendBtn: HTMLButtonElement
+  private settingsEl: HTMLElement
+  private chatEl: HTMLElement
+
+  constructor(
+    private root: HTMLElement,
+    private host: AgentPanelHost
+  ) {
+    root.innerHTML = `
+      <div class="agent-head">
+        <span class="agent-title">Agente</span>
+        <button class="model-chip" data-action="settings" title="Impostazioni del modello"><i></i><span>—</span></button>
+        <div class="agent-actions">
+          <button class="icon-btn sm" data-action="new" title="Nuova conversazione">${icons.plus}</button>
+          <button class="icon-btn sm" data-action="settings" title="Impostazioni AI">${icons.sliders}</button>
+          <button class="icon-btn sm" data-action="close" title="Chiudi (⌘J)">${icons.close}</button>
+        </div>
+      </div>
+      <div class="agent-chat">
+        <div class="agent-messages"></div>
+        <form class="agent-composer">
+          <textarea rows="1" placeholder="Chiedi qualcosa al tuo second brain…" spellcheck="false"></textarea>
+          <button type="submit" class="send" title="Invia (↵)">${icons.send}</button>
+        </form>
+      </div>
+      <div class="agent-settings hidden"></div>`
+    this.messagesEl = root.querySelector('.agent-messages')!
+    this.input = root.querySelector('textarea')!
+    this.sendBtn = root.querySelector('.send')!
+    this.settingsEl = root.querySelector('.agent-settings')!
+    this.chatEl = root.querySelector('.agent-chat')!
+
+    root.querySelector('form')!.addEventListener('submit', (e) => {
+      e.preventDefault()
+      if (this.running) void window.api.agentStop()
+      else this.submit()
+    })
+    this.input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault()
+        if (!this.running) this.submit()
+      }
+    })
+    this.input.addEventListener('input', () => this.autosize())
+    root.addEventListener('click', (e) => this.onClick(e))
+    window.api.onAgentEvent((ev) => this.handle(ev))
+    window.api.onIndexStatus((s) => {
+      this.index = s
+      this.paintIndex()
+    })
+    void this.init()
+  }
+
+  private async init(): Promise<void> {
+    this.settings = await window.api.aiGetSettings()
+    await this.refreshStatus()
+    this.paintEmpty()
+  }
+
+  get isOpen(): boolean {
+    return !this.root.classList.contains('hidden')
+  }
+
+  toggle(force?: boolean): void {
+    const open = force ?? !this.isOpen
+    this.root.classList.toggle('hidden', !open)
+    this.host.onToggle(open)
+    if (open) {
+      void this.refreshStatus()
+      requestAnimationFrame(() => this.input.focus())
+    }
+  }
+
+  /* ---------------------------------------------------------------- status */
+
+  private async refreshStatus(): Promise<void> {
+    this.status = await window.api.aiStatus(this.settings)
+    // first run with Ollama: pick a model automatically
+    if (this.status.ok && !this.settings.model && this.status.models.length) {
+      this.settings.model = this.status.models.find((m) => !/embed/i.test(m)) ?? this.status.models[0]
+      await window.api.aiSaveSettings(this.settings)
+    }
+    this.paintChip()
+    if (!this.settingsEl.classList.contains('hidden')) this.paintSettings()
+    if (!this.messagesEl.querySelector('.msg')) this.paintEmpty()
+  }
+
+  private paintChip(): void {
+    const chip = this.root.querySelector('.model-chip')!
+    const ok = this.status?.ok && this.settings.model && this.status.models.includes(this.settings.model)
+    chip.className = 'model-chip ' + (ok ? 'ok' : this.status?.ok ? 'warn' : 'off')
+    chip.querySelector('span')!.textContent = this.status?.ok ? this.settings.model || 'scegli un modello' : 'non collegato'
+  }
+
+  private paintEmpty(): void {
+    if (this.messagesEl.querySelector('.msg')) return
+    const ready = this.status?.ok && this.settings.model
+    this.messagesEl.innerHTML = ready
+      ? `<div class="agent-empty">
+          <p>Fai una domanda sul tuo vault. L'agente cerca e legge le note, ragiona sui collegamenti e — se glielo chiedi — crea o modifica neuroni, chiedendoti conferma per ogni modifica.</p>
+          <div class="suggestions">${SUGGESTIONS.map((s) => `<button class="suggestion">${esc(s)}</button>`).join('')}</div>
+        </div>`
+      : `<div class="agent-empty">
+          <h4>Collega un modello locale</h4>
+          <p>${this.status?.error ? esc(this.status.error) : 'Nessun server del modello trovato.'}</p>
+          <ol>
+            <li>Avvia <b>Ollama</b> (oppure il server di LM Studio).</li>
+            <li>Assicurati di avere un modello che supporta gli strumenti (es. Qwen 3, Llama 3.1, Mistral).</li>
+            <li>Sceglilo nelle impostazioni dell'agente.</li>
+          </ol>
+          <div class="row"><button class="btn" data-action="retry">${icons.refresh}Riprova</button><button class="btn ghost" data-action="settings">${icons.sliders}Impostazioni</button></div>
+        </div>`
+  }
+
+  /* ------------------------------------------------------------------ chat */
+
+  private submit(text = this.input.value.trim()): void {
+    if (!text || this.running) return
+    this.messagesEl.querySelector('.agent-empty')?.remove()
+    const user = document.createElement('div')
+    user.className = 'msg user'
+    user.innerHTML = `<div class="bubble"></div>`
+    user.querySelector('.bubble')!.textContent = text
+    this.messagesEl.appendChild(user)
+    this.message = document.createElement('div')
+    this.message.className = 'msg assistant'
+    this.message.innerHTML = `<div class="typing"><i></i><i></i><i></i></div>`
+    this.messagesEl.appendChild(this.message)
+    this.segments = []
+    this.input.value = ''
+    this.autosize()
+    this.setRunning(true)
+    this.scroll(true)
+    void window.api.agentSend(text)
+  }
+
+  private setRunning(v: boolean): void {
+    this.running = v
+    this.sendBtn.innerHTML = v ? icons.stop : icons.send
+    this.sendBtn.title = v ? 'Interrompi' : 'Invia (↵)'
+    this.sendBtn.classList.toggle('stop', v)
+  }
+
+  handle(e: AgentEvent): void {
+    if (!this.message && e.type !== 'activity') return
+    const msg = this.message!
+    switch (e.type) {
+      case 'start':
+        break
+      case 'text':
+      case 'reasoning': {
+        msg.querySelector('.typing')?.remove()
+        let seg = this.segments[this.segments.length - 1]
+        if (!seg || seg.kind !== e.type) {
+          const el = document.createElement(e.type === 'text' ? 'div' : 'details')
+          if (e.type === 'text') el.className = 'markdown answer'
+          else {
+            el.className = 'reasoning'
+            el.innerHTML = `<summary>Ragionamento</summary><div class="r-text"></div>`
+          }
+          msg.appendChild(el)
+          seg = { kind: e.type, text: '', el } as Segment
+          this.segments.push(seg)
+        }
+        ;(seg as { text: string }).text += e.delta
+        this.queueRender(seg)
+        break
+      }
+      case 'tool':
+        msg.querySelector('.typing')?.remove()
+        this.upsertTool(e.call)
+        break
+      case 'activity':
+        this.host.onActivity(e.ids, this.settings.followAgent)
+        break
+      case 'notice':
+        this.appendOther('notice', e.message)
+        break
+      case 'error':
+        msg.querySelector('.typing')?.remove()
+        this.appendOther('error', e.message)
+        this.finish()
+        break
+      case 'done':
+        this.finish()
+        break
+    }
+    this.scroll()
+  }
+
+  private finish(): void {
+    this.message?.querySelector('.typing')?.remove()
+    if (this.message && !this.message.childElementCount) this.appendOther('notice', 'Nessuna risposta.')
+    for (const seg of this.renderQueued) this.renderSegment(seg)
+    this.renderQueued.clear()
+    this.setRunning(false)
+    // light up every neuron cited in the answer
+    const cited = new Set<string>()
+    for (const seg of this.segments) {
+      if (seg.kind !== 'text') continue
+      for (const m of seg.text.matchAll(/\[\[([^\]\n]+?)\]\]/g)) {
+        const id = this.host.resolve(m[1].split('|')[0].split('#')[0].trim())
+        if (id && this.host.exists(id)) cited.add(id)
+      }
+    }
+    if (cited.size) this.host.onActivity([...cited], this.settings.followAgent)
+  }
+
+  private appendOther(kind: 'notice' | 'error', text: string): void {
+    const el = document.createElement('div')
+    el.className = kind
+    el.textContent = text
+    this.message?.appendChild(el)
+    this.segments.push({ kind: 'other', el })
+  }
+
+  private queueRender(seg: Segment): void {
+    if (this.renderQueued.has(seg)) return
+    this.renderQueued.add(seg)
+    requestAnimationFrame(() => {
+      if (!this.renderQueued.delete(seg)) return
+      this.renderSegment(seg)
+      this.scroll()
+    })
+  }
+
+  private renderSegment(seg: Segment): void {
+    if (seg.kind === 'reasoning') seg.el.querySelector('.r-text')!.textContent = seg.text.trim()
+    if (seg.kind !== 'text') return
+    const links: Record<string, string> = {}
+    for (const m of seg.text.matchAll(/\[\[([^\]\n]+?)\]\]/g)) {
+      const key = m[1].split('|')[0].split('#')[0].split('^')[0].trim()
+      links[key] = this.host.resolve(key) ?? 'unresolved:' + key.toLowerCase()
+    }
+    seg.el.innerHTML = renderMarkdown(seg.text, links, (id) => this.host.exists(id))
+    decorateCallouts(seg.el)
+  }
+
+  private upsertTool(call: AgentToolCall): void {
+    let entry = this.tools.get(call.id)
+    if (!entry) {
+      const el = document.createElement('div')
+      this.message!.appendChild(el)
+      this.segments.push({ kind: 'tool', el })
+      entry = { call, el }
+      this.tools.set(call.id, entry)
+    }
+    entry.call = call
+    const el = entry.el
+    el.className = `tool ${call.status}${call.ids?.length ? ' has-ids' : ''}`
+    el.dataset.call = call.id
+    const ic =
+      call.status === 'running'
+        ? '<span class="spinner"></span>'
+        : call.status === 'done'
+          ? icons.check
+          : call.status === 'awaiting'
+            ? icons.pen
+            : icons.close
+    let html = `<div class="tool-row" data-focus="${call.id}"><span class="tool-ic">${ic}</span><span class="tool-label">${esc(call.label)}</span>${
+      call.summary ? `<span class="tool-sum">${esc(call.summary)}</span>` : ''
+    }</div>`
+    if (call.preview) {
+      const p = call.preview
+      html += `<div class="tool-preview">
+        <div class="tool-path"><span>${esc(p.path)}</span><em>${p.isNew ? 'nuova nota' : 'modifica'}</em></div>
+        <pre class="diff">${diffHtml(p.diff)}</pre>
+        ${
+          call.status === 'awaiting'
+            ? `<div class="tool-approve"><button class="btn primary sm" data-approve="${call.id}">${icons.check}Approva</button><button class="btn sm" data-reject="${call.id}">Rifiuta</button></div>`
+            : call.change && !call.change.undone
+              ? `<div class="tool-approve"><button class="btn ghost sm" data-undo="${call.change.changeId}" data-undo-call="${call.id}">Annulla modifica</button></div>`
+              : call.change?.undone
+                ? `<div class="tool-approve muted">Modifica annullata</div>`
+                : ''
+        }
+      </div>`
+    }
+    el.innerHTML = html
+  }
+
+  private onClick(e: MouseEvent): void {
+    const t = e.target as HTMLElement
+    const action = t.closest<HTMLElement>('[data-action]')?.dataset.action
+    if (action === 'close') return this.toggle(false)
+    if (action === 'settings') return this.showSettings(this.settingsEl.classList.contains('hidden'))
+    if (action === 'retry') return void this.refreshStatus()
+    if (action === 'new') {
+      void window.api.agentReset()
+      this.tools.clear()
+      this.message = null
+      this.messagesEl.innerHTML = ''
+      this.setRunning(false)
+      this.host.onClear()
+      this.showSettings(false)
+      this.paintEmpty()
+      return
+    }
+    const sug = t.closest<HTMLElement>('.suggestion')
+    if (sug) return this.submit(sug.textContent ?? '')
+    const node = t.closest<HTMLElement>('[data-node]')
+    if (node) {
+      e.preventDefault()
+      return this.host.openNote(node.dataset.node!)
+    }
+    const file = t.closest<HTMLElement>('[data-file]')
+    if (file) {
+      e.preventDefault()
+      return void window.api.openFile(file.dataset.file!)
+    }
+    const approve = t.closest<HTMLElement>('[data-approve]')?.dataset.approve
+    if (approve) return void window.api.agentApprove(approve, true)
+    const reject = t.closest<HTMLElement>('[data-reject]')?.dataset.reject
+    if (reject) return void window.api.agentApprove(reject, false)
+    const undoBtn = t.closest<HTMLElement>('[data-undo]')
+    if (undoBtn) return void this.undo(undoBtn.dataset.undo!, undoBtn.dataset.undoCall!)
+    const focus = t.closest<HTMLElement>('[data-focus]')?.dataset.focus
+    if (focus) {
+      const ids = this.tools.get(focus)?.call.ids
+      if (ids?.length) this.host.focusNodes(ids)
+    }
+    if (t.closest('[data-copy]')) void this.copyMcp()
+    if (t.closest('[data-index]')) void window.api.indexBuild()
+  }
+
+  private async undo(changeId: string, callId: string): Promise<void> {
+    const res = await window.api.agentUndo(changeId)
+    const entry = this.tools.get(callId)
+    if (res.ok && entry?.call.change) {
+      entry.call.change.undone = true
+      this.upsertTool(entry.call)
+    }
+    if (!res.ok) {
+      const note = document.createElement('div')
+      note.className = 'error'
+      note.textContent = res.message
+      entry?.el.appendChild(note)
+      setTimeout(() => note.remove(), 6000)
+    }
+  }
+
+  /* -------------------------------------------------------------- settings */
+
+  private showSettings(show: boolean): void {
+    this.settingsEl.classList.toggle('hidden', !show)
+    this.chatEl.classList.toggle('hidden', show)
+    if (show) {
+      this.paintSettings()
+      void window.api.indexStatus().then((s) => {
+        this.index = s
+        this.paintIndex()
+      })
+      void this.paintMcp()
+    }
+  }
+
+  private paintSettings(): void {
+    const s = this.settings
+    const models = this.status?.models ?? []
+    const chatModels = models.filter((m) => !/embed/i.test(m))
+    const embedModels = models.filter((m) => /embed|bge|e5|minilm|gte/i.test(m))
+    const option = (v: string, label: string, sel: string): string => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(label)}</option>`
+    this.settingsEl.innerHTML = `
+      <div class="set-scroll">
+        <h4>Modello</h4>
+        <label class="field"><span>Server</span>
+          <select data-k="provider">${PROVIDERS.map((p) => option(p.id, p.label, s.provider)).join('')}</select></label>
+        <label class="field"><span>Indirizzo</span><input data-k="baseUrl" value="${esc(s.baseUrl)}" spellcheck="false" /></label>
+        <div class="status-line ${this.status?.ok ? 'ok' : 'off'}">${
+          this.status?.ok ? `Collegato · ${models.length} modelli disponibili` : esc(this.status?.error ?? 'Non collegato')
+        }<button class="link-btn" data-action="retry">Aggiorna</button></div>
+        <label class="field"><span>Modello di chat</span>
+          <select data-k="model">${s.model && !chatModels.includes(s.model) ? option(s.model, s.model + ' (non trovato)', s.model) : ''}${
+            chatModels.length ? chatModels.map((m) => option(m, m, s.model)).join('') : option('', '—', s.model)
+          }</select></label>
+        <label class="field"><span>Contesto (token)</span><input data-k="numCtx" type="number" min="2048" step="1024" value="${s.numCtx}" /></label>
+        <label class="slider"><span>Temperatura<output>${s.temperature.toFixed(2)}</output></span>
+          <input data-k="temperature" type="range" min="0" max="1.2" step="0.05" value="${s.temperature}" /></label>
+        <label class="toggle"><span>Ragionamento esteso (più lento)</span><input type="checkbox" data-k="think" ${s.think ? 'checked' : ''} /><i></i></label>
+        <label class="toggle"><span>Segui l'agente nella vista 3D</span><input type="checkbox" data-k="followAgent" ${s.followAgent ? 'checked' : ''} /><i></i></label>
+        <label class="toggle"><span>Applica le modifiche senza chiedere</span><input type="checkbox" data-k="autoApprove" ${s.autoApprove ? 'checked' : ''} /><i></i></label>
+        <p class="hint-text">Ogni modifica viene salvata con un backup e si può annullare dalla chat.</p>
+
+        <h4>Ricerca semantica</h4>
+        <label class="field"><span>Modello di embedding</span>
+          <select data-k="embedModel">${option('', 'Nessuno (solo parole chiave)', s.embedModel)}${
+            s.embedModel && !embedModels.includes(s.embedModel) ? option(s.embedModel, s.embedModel, s.embedModel) : ''
+          }${embedModels.map((m) => option(m, m, s.embedModel)).join('')}</select></label>
+        <div class="index-status"></div>
+
+        <h4>Usa il vault da altre app (MCP)</h4>
+        <p class="hint-text">LM Studio, Claude Desktop e altri client MCP possono usare gli stessi strumenti dell'agente. Incolla questa configurazione nel loro file MCP:</p>
+        <pre class="mcp-config">…</pre>
+        <button class="btn ghost sm" data-copy>${icons.copy}Copia configurazione</button>
+      </div>`
+    this.settingsEl.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-k]').forEach((el) => {
+      el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', () => this.onSetting(el))
+    })
+    this.paintIndex()
+  }
+
+  private onSetting(el: HTMLInputElement | HTMLSelectElement): void {
+    const k = el.dataset.k as keyof AiSettings
+    const s = this.settings as unknown as Record<string, unknown>
+    if (el instanceof HTMLInputElement && el.type === 'checkbox') s[k] = el.checked
+    else if (k === 'numCtx' || k === 'temperature') s[k] = Number(el.value)
+    else s[k] = el.value
+    if (k === 'temperature') el.parentElement!.querySelector('output')!.textContent = Number(el.value).toFixed(2)
+    if (k === 'provider') {
+      const def = PROVIDERS.find((p) => p.id === el.value)!
+      if (PROVIDERS.some((p) => p.url === this.settings.baseUrl)) this.settings.baseUrl = def.url
+      this.settings.model = ''
+    }
+    clearTimeout(this.saveTimer)
+    this.saveTimer = window.setTimeout(async () => {
+      await window.api.aiSaveSettings(this.settings)
+      if (k === 'provider' || k === 'baseUrl') await this.refreshStatus()
+      else this.paintChip()
+      if (k === 'provider') this.paintSettings()
+    }, k === 'baseUrl' ? 600 : 150)
+  }
+
+  private paintIndex(): void {
+    const el = this.settingsEl.querySelector('.index-status')
+    if (!el) return
+    const s = this.index
+    if (!this.settings.embedModel) {
+      el.innerHTML = `<p class="hint-text">Senza un modello di embedding la ricerca usa le parole chiave. Per cercare anche per significato installa ad esempio <code>nomic-embed-text</code> in Ollama e sceglilo qui.</p>`
+      return
+    }
+    if (!s) return
+    const pct = s.running && s.todo ? Math.round(((s.done ?? 0) / s.todo) * 100) : null
+    el.innerHTML = `<div class="status-line ${s.error ? 'off' : s.indexed ? 'ok' : ''}">${
+      s.error
+        ? esc(s.error)
+        : s.running
+          ? `Indicizzazione… ${pct ?? 0}%`
+          : s.indexed
+            ? `${s.indexed} / ${s.total} note indicizzate`
+            : 'Indice non ancora creato'
+    }</div>${s.running ? '' : `<button class="btn ghost sm" data-index>${icons.refresh}${s.indexed ? 'Aggiorna indice' : 'Crea indice'}</button>`}`
+  }
+
+  private async paintMcp(): Promise<void> {
+    const info = await window.api.mcpInfo()
+    const pre = this.settingsEl.querySelector('.mcp-config')
+    if (pre) pre.textContent = info.config
+  }
+
+  private async copyMcp(): Promise<void> {
+    const info = await window.api.mcpInfo()
+    try {
+      await navigator.clipboard.writeText(info.config)
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = info.config
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      ta.remove()
+    }
+    const btn = this.settingsEl.querySelector('[data-copy]')
+    if (btn) btn.innerHTML = `${icons.check}Copiata`
+  }
+
+  /* ------------------------------------------------------------------ misc */
+
+  private autosize(): void {
+    this.input.style.height = 'auto'
+    this.input.style.height = Math.min(this.input.scrollHeight, 160) + 'px'
+  }
+
+  private scroll(force = false): void {
+    const el = this.messagesEl
+    if (force || el.scrollHeight - el.scrollTop - el.clientHeight < 120) el.scrollTop = el.scrollHeight
+  }
+}
+
+function diffHtml(diff: DiffLine[]): string {
+  return diff
+    .map((d) => `<span class="${d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'ctx'}">${d.op === ' ' ? ' ' : d.op} ${esc(d.text)}</span>`)
+    .join('')
+}
+
+const esc = (s: string): string =>
+  s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)

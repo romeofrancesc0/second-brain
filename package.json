@@ -1,0 +1,77 @@
+{
+  "name": "second-brain-viewer",
+  "productName": "Second Brain",
+  "version": "0.1.0",
+  "description": "Visualizzatore 3D del second brain (vault Obsidian) come rete neurale.",
+  "author": "Francesco Romeo",
+  "private": true,
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist": "electron-vite build && electron-builder --mac",
+    "app": "electron-vite build && electron-builder --mac --dir",
+    "icon": "electron scripts/make-icon.cjs",
+    "app:win": "electron-vite build && electron-builder --win --dir",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "service": "node out/main/server.js"
+  },
+  "build": {
+    "appId": "com.francescoromeo.secondbrain",
+    "productName": "Second Brain",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png",
+      "darkModeSupport": true,
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "electronLanguages": [
+      "it",
+      "en"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.186.0",
+    "d3-force-3d": "^3.0.6",
+    "dompurify": "^3.4.17",
+    "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "katex": "^0.16.47",
+    "marked": "^18.1.1",
+    "marked-katex-extension": "^5.1.13",
+    "three": "^0.186.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  }
+}
