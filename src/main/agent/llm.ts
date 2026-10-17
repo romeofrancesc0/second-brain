@@ -55,6 +55,9 @@ export class ModelError extends Error {
   }
 }
 
+/** How long Ollama keeps a model in (GPU) memory after the last request. */
+const OLLAMA_KEEP_ALIVE = '2m'
+
 export function createClient(s: Pick<AiSettings, 'provider' | 'baseUrl'>): ChatClient {
   const base = s.baseUrl.replace(/\/+$/, '')
   return s.provider === 'ollama' ? new OllamaClient(base) : new OpenAICompatClient(base)
@@ -172,7 +175,9 @@ class OllamaClient implements ChatClient {
         if (m.role === 'tool') return { role: 'tool', content: m.content, tool_name: m.toolName }
         return { role: m.role, content: m.content }
       }),
-      options: { num_ctx: o.numCtx, temperature: o.temperature }
+      options: { num_ctx: o.numCtx, temperature: o.temperature },
+      // free the GPU after 2 idle minutes: every new question loads the model again (a few seconds)
+      keep_alive: OLLAMA_KEEP_ALIVE
     }
     if (o.tools?.length) body.tools = o.tools.map((t) => ({ type: 'function', function: t }))
     // thinking models think by default: say it explicitly either way
@@ -238,7 +243,7 @@ class OllamaClient implements ChatClient {
     const res = await request(this.base + '/api/embed', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ model, input: texts }),
+      body: JSON.stringify({ model, input: texts, keep_alive: OLLAMA_KEEP_ALIVE }),
       signal
     })
     const j = (await res.json()) as { embeddings?: number[][] }

@@ -11,7 +11,7 @@ foreach ($a in $apps) {
 Write-Host "`n== 2/5 Ollama raggiungibile dalla rete privata (Tailscale)" -ForegroundColor Cyan
 # Ollama ascolta su tutte le interfacce, ma il firewall lascia passare SOLO gli indirizzi Tailscale (100.64.0.0/10)
 [Environment]::SetEnvironmentVariable('OLLAMA_HOST', '0.0.0.0:11434', 'User')
-[Environment]::SetEnvironmentVariable('OLLAMA_KEEP_ALIVE', '30m', 'User')
+[Environment]::SetEnvironmentVariable('OLLAMA_KEEP_ALIVE', '2m', 'User')
 Get-NetFirewallRule -DisplayName 'Ollama (solo Tailscale)' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName 'Ollama (solo Tailscale)' -Direction Inbound -Protocol TCP -LocalPort 11434 `
   -RemoteAddress 100.64.0.0/10 -Action Allow | Out-Null
