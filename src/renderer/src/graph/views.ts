@@ -11,7 +11,7 @@ export interface ViewInfo {
 export const VIEWS: ViewInfo[] = [
   { id: 'nebula', name: 'Nebulosa', tagline: 'Rete neurale 3D con atmosfera e profondità', key: '1' },
   { id: 'minimal', name: 'Minimal', tagline: 'Mappa pulita: punti, linee, nient’altro', key: '2' },
-  { id: 'hologram', name: 'Ologramma', tagline: 'Proiezione sperimentale con griglia e scanline', key: '3' }
+  { id: 'hologram', name: 'Ologramma', tagline: 'Un cervello olografico: avvicinati per vedere i neuroni', key: '3' }
 ]
 
 const prefersLight = window.matchMedia('(prefers-color-scheme: light)')

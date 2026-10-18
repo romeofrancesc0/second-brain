@@ -43,7 +43,7 @@ const VIEW_SLIDERS: Record<ViewMode, SliderDef[]> = {
   ],
   minimal: [],
   hologram: [
-    { key: 'interference', label: 'Interferenze', hint: 'Scanline, sfarfallio e aberrazione cromatica', min: 0, max: 1.5, step: 0.05 },
+    { key: 'interference', label: 'Interferenze', hint: 'Scanline e leggero sfarfallio della proiezione', min: 0, max: 1.5, step: 0.05 },
     { key: 'bloom', label: 'Bagliore', min: 0, max: 2.5, step: 0.05 }
   ]
 }
@@ -51,7 +51,7 @@ const VIEW_SLIDERS: Record<ViewMode, SliderDef[]> = {
 const VIEW_TOGGLES: Record<ViewMode, ToggleDef[]> = {
   nebula: [],
   minimal: [{ key: 'flat', label: 'Mappa 2D', hint: 'Distende la rete su un piano: si sposta trascinando, senza rotazione' }],
-  hologram: [{ key: 'grid', label: 'Griglia di proiezione', hint: 'Il piano luminoso sotto la rete' }]
+  hologram: [{ key: 'grid', label: 'Base di proiezione', hint: 'La griglia luminosa sotto il cervello' }]
 }
 
 const GRAPH_SLIDERS: SliderDef[] = [
@@ -222,7 +222,7 @@ export class SettingsDialog {
       this.paint()
       return
     }
-    const view = t.closest<HTMLElement>('[data-view]')?.dataset.view as ViewMode | undefined
+    const view = t.closest<HTMLElement>('.view-card')?.dataset.view as ViewMode | undefined
     if (view && view !== this.settings.view) {
       this.settings.view = view
       this.emit(false)
@@ -448,15 +448,23 @@ function preview(view: ViewMode, light: boolean): string {
       <circle cx="44" cy="40" r="2" fill="${bg}"/>
     </svg>`
   }
-  const grid = Array.from({ length: 9 }, (_, i) => `<line x1="${60 + (i - 4) * 9}" y1="58" x2="${60 + (i - 4) * 26}" y2="72"/>`).join('')
+  const grid = Array.from({ length: 9 }, (_, i) => `<line x1="${60 + (i - 4) * 8}" y1="62" x2="${60 + (i - 4) * 20}" y2="72"/>`).join('')
+  const sparks = [[42, 30], [55, 22], [68, 26], [80, 33], [50, 40], [63, 38], [74, 44], [38, 42], [58, 31], [86, 40]]
   return `<svg viewBox="0 0 120 72" preserveAspectRatio="xMidYMid slice">
-    <defs><linearGradient id="pv-hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a1824"/><stop offset="1" stop-color="#03070c"/></linearGradient></defs>
+    <defs>
+      <linearGradient id="pv-hg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#081521"/><stop offset="1" stop-color="#03070c"/></linearGradient>
+      <radialGradient id="pv-hb" cx=".5" cy=".45" r=".6"><stop offset="0" stop-color="#52dbff" stop-opacity=".05"/><stop offset=".8" stop-color="#52dbff" stop-opacity=".12"/><stop offset="1" stop-color="#8eeaff" stop-opacity=".35"/></radialGradient>
+    </defs>
     <rect width="120" height="72" fill="url(#pv-hg)"/>
-    <g stroke="#52dbff" stroke-opacity=".28" stroke-width=".5">${grid}<line x1="0" y1="62" x2="120" y2="62"/><line x1="0" y1="67" x2="120" y2="67"/></g>
-    <g stroke="#52dbff" stroke-opacity=".55" stroke-width=".6" stroke-dasharray="2 1.5">${edges.map(([a, b]) => line(a, b)).join('')}</g>
-    ${nodes.map((n) => `<circle cx="${n[0]}" cy="${n[1]}" r="${n[2] * 0.9}" fill="#52dbff" fill-opacity=".12" stroke="#8eeaff" stroke-width=".7"/><circle cx="${n[0]}" cy="${n[1]}" r=".9" fill="#d9f8ff"/>`).join('')}
-    <circle cx="44" cy="40" r="8" fill="none" stroke="#d9f8ff" stroke-width=".6" stroke-dasharray="1.6 1.4"/>
-    <g fill="#52dbff" opacity=".06">${Array.from({ length: 18 }, (_, i) => `<rect y="${i * 4}" width="120" height="1.4"/>`).join('')}</g>
+    <g stroke="#52dbff" stroke-opacity=".16" stroke-width=".5">${grid}<line x1="0" y1="64" x2="120" y2="64"/></g>
+    <path d="M33 45C25 43 23 33 28 26C32 18 43 12 55 13C65 9 79 11 88 18C97 23 100 33 96 41C97 47 91 51 84 50C79 54 70 54 66 51L58 51C52 54 44 54 40 50C35 50 32 48 33 45Z" fill="url(#pv-hb)" stroke="#8eeaff" stroke-opacity=".7" stroke-width=".7"/>
+    <ellipse cx="80" cy="53" rx="11" ry="6" fill="#52dbff" fill-opacity=".08" stroke="#8eeaff" stroke-opacity=".5" stroke-width=".6"/>
+    <path d="M69 55L71 64" stroke="#8eeaff" stroke-opacity=".45" stroke-width="3" stroke-linecap="round"/>
+    <g fill="none" stroke="#8eeaff" stroke-opacity=".35" stroke-width=".6" stroke-linecap="round">
+      <path d="M40 22C44 27 41 31 46 35"/><path d="M52 16C50 22 56 25 53 31"/><path d="M64 14C61 20 67 24 63 30"/><path d="M76 17C72 23 79 27 74 34"/>
+      <path d="M86 24C82 29 88 33 84 39"/><path d="M33 34C38 36 40 40 45 41"/><path d="M48 44C54 41 60 44 66 42"/><path d="M70 45C75 41 82 44 88 42"/>
+    </g>
+    <g fill="#d9f8ff">${sparks.map(([x, y]) => `<circle cx="${x}" cy="${y}" r=".8"/>`).join('')}</g>
   </svg>`
 }
 

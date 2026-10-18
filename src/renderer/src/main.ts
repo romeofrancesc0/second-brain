@@ -47,7 +47,6 @@ async function boot(): Promise<void> {
   const settingsUi = new SettingsDialog($('#settings'), settings)
   const welcome = new Welcome($('#welcome'))
   const dock = new Dock($('#dock'))
-  dock.setView(settings.view)
   paintHint()
   const agentPanel = new AgentPanel($('#agent'), {
     resolve: (target) => {
@@ -121,7 +120,6 @@ async function boot(): Promise<void> {
     settingsUi.close()
     agentPanel.openSettings()
   }
-  dock.onView = (view) => setView(view)
   dock.onZoom = (f) => brain.zoom(f)
   dock.onHome = () => brain.resetView()
   onSystemToneChange(() => {
@@ -142,7 +140,6 @@ async function boot(): Promise<void> {
       applyTheme()
       brain.applySettings(s)
       if ((structural || reshape) && graph) rebuild(false)
-      dock.setView(s.view)
       paintHint()
     }
     // a short fade hides the swap of shaders and colours
@@ -276,13 +273,17 @@ async function boot(): Promise<void> {
     const cache = flat ? graph.positions2d : graph.positions
     let alpha: number | undefined
     if (brain.nodes.length && brain.layoutFlat === flat) {
-      brain.nodes.forEach((n, i) => known.set(n.id, [brain.positions[i * 3], brain.positions[i * 3 + 1], brain.positions[i * 3 + 2]]))
+      brain.nodes.forEach((n, i) => known.set(n.id, [brain.layoutPositions[i * 3], brain.layoutPositions[i * 3 + 1], brain.layoutPositions[i * 3 + 2]]))
     } else if (nodes.filter((n) => cache[n.id]).length > nodes.length * 0.8 || !brain.nodes.length) {
       for (const [id, p] of Object.entries(cache)) known.set(id, p)
     } else {
       const spread = flat ? 0 : 120
       brain.nodes.forEach((n, i) =>
-        known.set(n.id, [brain.positions[i * 3], brain.positions[i * 3 + 1], brain.positions[i * 3 + 2] + (Math.random() - 0.5) * spread])
+        known.set(n.id, [
+          brain.layoutPositions[i * 3],
+          brain.layoutPositions[i * 3 + 1],
+          brain.layoutPositions[i * 3 + 2] + (Math.random() - 0.5) * spread
+        ])
       )
       alpha = 0.6
     }
@@ -352,7 +353,7 @@ function applyTheme(): void {
   const root = document.documentElement
   const light = isLight(settings)
   root.dataset.theme = light ? 'light' : 'dark'
-  root.dataset.view = settings.view
+  root.dataset.look = settings.view
   root.style.setProperty('--brand', settings.accent)
   void window.api.setWindowTheme(light ? 'light' : 'dark')
 }
@@ -366,7 +367,7 @@ function paintHint(): void {
     ['scroll', 'zoom'],
     ['W A S D', flat ? 'muovi' : 'vola'],
     ['click', 'apri neurone'],
-    ['1 2 3', 'cambia vista'],
+    [`${document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl'} ,`, 'impostazioni'],
     ['?', 'scorciatoie']
   ]
   el.innerHTML = items.map(([k, label]) => `<span><kbd>${k}</kbd> ${label}</span>`).join('')

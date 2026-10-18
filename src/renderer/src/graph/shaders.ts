@@ -446,7 +446,7 @@ export const filmShader = {
     uVignette: { value: 0.35 },
     uAspect: { value: 1.6 },
     uHeight: { value: 900 },
-    /** Hologram: scanlines and the occasional glitched band (0 = off). */
+    /** Hologram: scanlines (0 = off). */
     uScan: { value: 0 },
     /** Strength of the chromatic fringing towards the edges. */
     uAberr: { value: 1 }
@@ -472,9 +472,6 @@ export const filmShader = {
     }
     void main() {
       vec2 uv = vUv;
-      // hologram: now and then a thin band of the image slips sideways
-      float band = step(0.992, hash(vec2(floor(uTime * 7.0), floor(uv.y * 30.0)))) * uScan;
-      uv.x += band * 0.006 * (hash(vec2(uTime, uv.y)) - 0.5) * 2.0;
       vec2 c = uv - 0.5;
       // very light chromatic fringing towards the edges, like a real lens
       float f = dot(c, c) * 0.0045 * uAberr;
@@ -484,8 +481,7 @@ export const filmShader = {
       col.b = texture2D(tDiffuse, uv - c * f).b;
       // scanlines rolling slowly down the screen
       float lines = 0.5 + 0.5 * sin((uv.y * uHeight * 0.5 + uTime * 6.0) * 3.14159);
-      col *= 1.0 - uScan * 0.22 * lines;
-      col += vec3(0.1, 0.35, 0.5) * band * 0.08;
+      col *= 1.0 - uScan * 0.12 * lines;
       float v = smoothstep(0.85, 0.2, length(c * vec2(uAspect * 0.62, 1.0)));
       col *= mix(1.0 - uVignette, 1.0, v);
       float g = hash(uv * vec2(1920.0, 1080.0) + fract(uTime) * 61.0) - 0.5;
@@ -511,10 +507,19 @@ varying float vSeed;
 varying float vBlur;
 `
 
+/** Pushes a colour away from grey (linear space), keeping its luminance. */
+const VIVID = /* glsl */ `
+vec3 vivid(vec3 c) {
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  return clamp(l + (c - l) * 2.1, 0.0, 1.0);
+}
+`
+
 export const minimalNeuronFragment = /* glsl */ `
 uniform vec3 uBg;
 uniform float uLight;
 ${NEURON_VARYINGS}
+${VIVID}
 
 void main() {
   vec2 p = vUv;
@@ -527,8 +532,8 @@ void main() {
   float alpha = 1.0 - smoothstep(1.0 - aa, 1.0, shapeR);
   if (alpha <= 0.001) discard;
 
-  // on paper the soft palette needs a little more ink to stand out
-  vec3 base = mix(vColor, pow(vColor, vec3(1.3)) * 0.9, uLight);
+  // the soft palette of the nebula is too pale for flat discs: more saturation, a bit deeper on paper
+  vec3 base = vivid(vColor) * mix(1.0, 0.86, uLight);
   vec3 col = base;
   // hubs read as targets: a ring of background inside the disc
   if (isMoc) {
@@ -550,6 +555,7 @@ void main() {
 export const minimalHaloFragment = /* glsl */ `
 uniform float uLight;
 ${NEURON_VARYINGS}
+${VIVID}
 
 void main() {
   float r = length(vUv);
@@ -561,7 +567,7 @@ void main() {
   float ring = 1.0 - smoothstep(hw, hw + aa, abs(r - at));
   vec3 ink = uLight > 0.5 ? vec3(0.06, 0.07, 0.1) : vec3(0.93, 0.94, 0.97);
   bool selected = vState < 2.5;
-  vec3 col = selected ? ink : mix(vColor, ink, 0.35);
+  vec3 col = selected ? ink : mix(vivid(vColor), ink, 0.35);
   float a = ring * (selected ? 1.0 : 0.6);
   if (a < 0.01) discard;
   gl_FragColor = vec4(col, a);
@@ -576,12 +582,13 @@ varying vec3 vColor;
 varying float vAlpha;
 varying float vSeed;
 varying float vState;
+${VIVID}
 
 void main() {
   float core = 1.0 - smoothstep(0.45, 1.0, abs(vSide));
   float hl = vState > 0.5 ? 1.0 : 0.0;
   vec3 ink = uLight > 0.5 ? vec3(0.16, 0.18, 0.24) : vec3(0.6, 0.63, 0.72);
-  vec3 col = mix(ink, uLight > 0.5 ? vColor * 0.75 : vColor, hl);
+  vec3 col = mix(ink, vivid(vColor) * (uLight > 0.5 ? 0.8 : 1.0), hl);
   gl_FragColor = vec4(col, min(vAlpha * core * (hl > 0.5 ? 1.1 : 0.85), 1.0));
 }
 `
@@ -603,6 +610,7 @@ float holoHash(vec2 p) {
 export const holoNeuronFragment = /* glsl */ `
 uniform float uTime;
 uniform float uInterf;
+uniform float uReveal;
 ${NEURON_VARYINGS}
 ${HOLO}
 
@@ -638,18 +646,21 @@ void main() {
   float k = rim * 0.95 + body + core + wire;
   if (isUnresolved) k = rim * 0.6;
   // the projection is not perfectly stable
-  float flick = 1.0 - uInterf * 0.5 * step(0.985, holoHash(vec2(floor(uTime * 14.0), vSeed * 91.0)));
-  float scan = 1.0 - uInterf * 0.3 * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.7 - uTime * 9.0));
+  float flick = 1.0 - uInterf * 0.35 * step(0.99, holoHash(vec2(floor(uTime * 14.0), vSeed * 91.0)));
+  float scan = 1.0 - uInterf * 0.18 * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.7 - uTime * 9.0));
   vec3 col = holoTint(vColor);
   if (vState > 1.5 && vState < 2.5) col = mix(col, vec3(1.0), 0.45);
   if (vState > 2.5) k *= 1.35;
   float fade = (1.0 - vFog * 0.85) * (1.0 - vDim * 0.88);
-  gl_FragColor = vec4(col * k * inside * flick * scan * fade * 0.85, 1.0);
+  // seen from afar the neurons are faint sparks inside the brain; closer in they take over
+  float near = mix(0.32, 0.62, uReveal);
+  gl_FragColor = vec4(col * k * inside * flick * scan * fade * near, 1.0);
 }
 `
 
 export const holoHaloFragment = /* glsl */ `
 uniform float uTime;
+uniform float uReveal;
 ${NEURON_VARYINGS}
 ${HOLO}
 
@@ -659,7 +670,7 @@ void main() {
   bool isMoc = vKind > 0.5 && vKind < 1.5;
   float px = max(vPx, 1.0);
   float a = atan(vUv.y, vUv.x) / 6.2832 + 0.5;
-  float glow = exp(-(r - 1.0) * 3.0) * 0.09;
+  float glow = exp(-(r - 1.0) * 3.0) * 0.05;
   float k = 0.0;
   if (isMoc) {
     // four corner brackets around the hubs
@@ -680,7 +691,7 @@ void main() {
   }
   k *= smoothstep(3.0, 7.0, px);
   k += glow;
-  k *= (1.0 - vFog * 0.85) * (1.0 - vDim * 0.9);
+  k *= (1.0 - vFog * 0.85) * (1.0 - vDim * 0.9) * mix(0.45, 0.8, uReveal);
   if (k < 0.002) discard;
   gl_FragColor = vec4(mix(holoTint(vColor), vec3(1.0), 0.3) * k, 1.0);
 }
@@ -705,7 +716,7 @@ void main() {
   float dash = mix(0.35, 1.0, step(0.5, flow));
   float packet = pow(1.0 - fract(vT - uTime * 0.3 - vSeed), 24.0) * (0.4 + uPulses);
   vec3 col = holoTint(vColor);
-  gl_FragColor = vec4(col * core * (dash + packet * 2.0) * (1.0 + hl * 0.6), vAlpha * 1.2);
+  gl_FragColor = vec4(col * core * (dash + packet * 1.5) * (1.0 + hl * 0.6), vAlpha * 0.75);
 }
 `
 
@@ -737,6 +748,58 @@ void main() {
   float sweep = exp(-pow((d - fract(uTime * 0.06) * 1.3) * 14.0, 2.0)) * 0.5;
   float fade = 1.0 - smoothstep(0.25, 1.0, d);
   vec3 col = vec3(0.3, 0.78, 1.0) * (minor + major + rings + sweep) * fade;
-  gl_FragColor = vec4(col * 0.32, 1.0);
+  gl_FragColor = vec4(col * 0.13, 1.0);
+}
+`
+
+/** The hologram brain: glassy shell with folds, contour slices and a slow scanning band. */
+export const brainVertex = /* glsl */ `
+attribute float aFold;
+varying vec3 vN;
+varying vec3 vView;
+varying vec3 vLocal;
+varying float vFold;
+void main() {
+  vLocal = position;
+  vFold = aFold;
+  vN = normalize(normalMatrix * normal);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vView = -mv.xyz;
+  gl_Position = projectionMatrix * mv;
+}
+`
+
+export const brainFragment = /* glsl */ `
+uniform float uTime;
+uniform float uShell;
+uniform float uInterf;
+varying vec3 vN;
+varying vec3 vView;
+varying vec3 vLocal;
+varying float vFold;
+
+void main() {
+  vec3 n = normalize(vN);
+  vec3 v = normalize(vView);
+  float ndv = abs(dot(n, v));
+  float fres = pow(1.0 - ndv, 2.4);
+  float facing = gl_FrontFacing ? 1.0 : 0.4;
+  float sulcus = 1.0 - smoothstep(0.0, 0.6, vFold);
+  float gyrus = smoothstep(0.5, 1.0, vFold);
+
+  // thin horizontal contour lines slicing the volume, like a scanned model
+  float sl = vLocal.y * 24.0;
+  float dl = abs(fract(sl) - 0.5) / max(fwidth(sl), 1e-4);
+  float slice = 1.0 - smoothstep(0.4, 1.4, dl);
+  // a soft band of light sweeping upwards every few seconds
+  float band = fract(uTime * 0.06) * 2.6 - 1.3;
+  float sweep = exp(-pow((vLocal.y - band) * 7.0, 2.0));
+
+  float k = 0.012 + fres * 0.24 + gyrus * pow(ndv, 3.0) * 0.035 + slice * (0.02 + fres * 0.05) + sweep * (0.03 + gyrus * 0.07);
+  // the grooves between the folds stay dark, so the gyri read as soft ridges of light
+  k *= 1.0 - sulcus * 0.8;
+  k *= 1.0 - uInterf * 0.12 * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.7 - uTime * 9.0));
+  vec3 col = mix(vec3(0.3, 0.78, 1.0), vec3(0.62, 0.66, 1.0), smoothstep(-0.7, 0.8, vLocal.y));
+  gl_FragColor = vec4(col * k * facing * uShell, 1.0);
 }
 `
