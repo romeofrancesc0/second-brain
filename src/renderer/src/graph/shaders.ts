@@ -444,7 +444,12 @@ export const filmShader = {
     uTime: { value: 0 },
     uGrain: { value: 0.03 },
     uVignette: { value: 0.35 },
-    uAspect: { value: 1.6 }
+    uAspect: { value: 1.6 },
+    uHeight: { value: 900 },
+    /** Hologram: scanlines and the occasional glitched band (0 = off). */
+    uScan: { value: 0 },
+    /** Strength of the chromatic fringing towards the edges. */
+    uAberr: { value: 1 }
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -456,6 +461,9 @@ export const filmShader = {
     uniform float uGrain;
     uniform float uVignette;
     uniform float uAspect;
+    uniform float uHeight;
+    uniform float uScan;
+    uniform float uAberr;
     varying vec2 vUv;
     float hash(vec2 p) {
       vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -463,18 +471,272 @@ export const filmShader = {
       return fract((p3.x + p3.y) * p3.z);
     }
     void main() {
-      vec2 c = vUv - 0.5;
+      vec2 uv = vUv;
+      // hologram: now and then a thin band of the image slips sideways
+      float band = step(0.992, hash(vec2(floor(uTime * 7.0), floor(uv.y * 30.0)))) * uScan;
+      uv.x += band * 0.006 * (hash(vec2(uTime, uv.y)) - 0.5) * 2.0;
+      vec2 c = uv - 0.5;
       // very light chromatic fringing towards the edges, like a real lens
-      float f = dot(c, c) * 0.0045;
+      float f = dot(c, c) * 0.0045 * uAberr;
       vec3 col;
-      col.r = texture2D(tDiffuse, vUv + c * f).r;
-      col.g = texture2D(tDiffuse, vUv).g;
-      col.b = texture2D(tDiffuse, vUv - c * f).b;
+      col.r = texture2D(tDiffuse, uv + c * f).r;
+      col.g = texture2D(tDiffuse, uv).g;
+      col.b = texture2D(tDiffuse, uv - c * f).b;
+      // scanlines rolling slowly down the screen
+      float lines = 0.5 + 0.5 * sin((uv.y * uHeight * 0.5 + uTime * 6.0) * 3.14159);
+      col *= 1.0 - uScan * 0.22 * lines;
+      col += vec3(0.1, 0.35, 0.5) * band * 0.08;
       float v = smoothstep(0.85, 0.2, length(c * vec2(uAspect * 0.62, 1.0)));
       col *= mix(1.0 - uVignette, 1.0, v);
-      float g = hash(vUv * vec2(1920.0, 1080.0) + fract(uTime) * 61.0) - 0.5;
+      float g = hash(uv * vec2(1920.0, 1080.0) + fract(uTime) * 61.0) - 0.5;
       col += g * uGrain * (0.4 + 0.6 * (1.0 - dot(col, vec3(0.33))));
       gl_FragColor = vec4(col, 1.0);
     }
   `
 }
+
+/* ===================================================================== MINIMAL
+ * Flat discs, straight hairline links and a plain background (dark or paper white).
+ * No glow, no fog, no lens effects: the structure of the vault and nothing else. */
+
+const NEURON_VARYINGS = /* glsl */ `
+varying vec2 vUv;
+varying vec3 vColor;
+varying float vPx;
+varying float vState;
+varying float vKind;
+varying float vFog;
+varying float vDim;
+varying float vSeed;
+varying float vBlur;
+`
+
+export const minimalNeuronFragment = /* glsl */ `
+uniform vec3 uBg;
+uniform float uLight;
+${NEURON_VARYINGS}
+
+void main() {
+  vec2 p = vUv;
+  float r = length(p);
+  bool isMoc = vKind > 0.5 && vKind < 1.5;
+  bool isAttachment = vKind > 1.5 && vKind < 2.5;
+  bool isUnresolved = vKind > 2.5;
+  float shapeR = isAttachment ? max(abs(p.x), abs(p.y)) * 1.12 : r;
+  float aa = max(fwidth(shapeR), 0.004) * 1.2;
+  float alpha = 1.0 - smoothstep(1.0 - aa, 1.0, shapeR);
+  if (alpha <= 0.001) discard;
+
+  // on paper the soft palette needs a little more ink to stand out
+  vec3 base = mix(vColor, pow(vColor, vec3(1.3)) * 0.9, uLight);
+  vec3 col = base;
+  // hubs read as targets: a ring of background inside the disc
+  if (isMoc) {
+    float ring = smoothstep(0.58 - aa, 0.58, r) * (1.0 - smoothstep(0.74 - aa, 0.74, r));
+    col = mix(col, uBg, ring * 0.9 * smoothstep(3.0, 6.0, vPx));
+  }
+  if (isAttachment) col = mix(base, uBg, 0.4);
+  if (isUnresolved) {
+    alpha *= smoothstep(0.58 - aa, 0.58, r);
+    col = mix(base, uBg, 0.3);
+  }
+  if (vState > 2.5) col = mix(col, uLight > 0.5 ? vec3(0.0) : vec3(1.0), 0.18);
+  float fade = clamp(vDim * 0.85 + vFog * 0.45, 0.0, 0.92);
+  gl_FragColor = vec4(mix(col, uBg, fade), alpha);
+}
+`
+
+/** Selection and hover rings only, a few pixels away from the disc. */
+export const minimalHaloFragment = /* glsl */ `
+uniform float uLight;
+${NEURON_VARYINGS}
+
+void main() {
+  float r = length(vUv);
+  if (r < 0.98 || vState < 1.5) discard;
+  float px = max(vPx, 1.0);
+  float aa = fwidth(r) * 1.2;
+  float at = min(1.0 + 4.0 / px, 1.85);
+  float hw = 0.9 / px;
+  float ring = 1.0 - smoothstep(hw, hw + aa, abs(r - at));
+  vec3 ink = uLight > 0.5 ? vec3(0.06, 0.07, 0.1) : vec3(0.93, 0.94, 0.97);
+  bool selected = vState < 2.5;
+  vec3 col = selected ? ink : mix(vColor, ink, 0.35);
+  float a = ring * (selected ? 1.0 : 0.6);
+  if (a < 0.01) discard;
+  gl_FragColor = vec4(col, a);
+}
+`
+
+export const minimalSynapseFragment = /* glsl */ `
+uniform float uLight;
+varying float vSide;
+varying float vT;
+varying vec3 vColor;
+varying float vAlpha;
+varying float vSeed;
+varying float vState;
+
+void main() {
+  float core = 1.0 - smoothstep(0.45, 1.0, abs(vSide));
+  float hl = vState > 0.5 ? 1.0 : 0.0;
+  vec3 ink = uLight > 0.5 ? vec3(0.16, 0.18, 0.24) : vec3(0.6, 0.63, 0.72);
+  vec3 col = mix(ink, uLight > 0.5 ? vColor * 0.75 : vColor, hl);
+  gl_FragColor = vec4(col, min(vAlpha * core * (hl > 0.5 ? 1.1 : 0.85), 1.0));
+}
+`
+
+/* ==================================================================== HOLOGRAM
+ * A projection in thin air: wireframe globes, dashed light flowing along the links,
+ * a grid on the floor, scanlines and a little glitching. Everything adds light. */
+
+const HOLO = /* glsl */ `
+const vec3 HOLO_CYAN = vec3(0.32, 0.86, 1.0);
+vec3 holoTint(vec3 c) { return mix(c, HOLO_CYAN, 0.5) * 1.1; }
+float holoHash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+`
+
+export const holoNeuronFragment = /* glsl */ `
+uniform float uTime;
+uniform float uInterf;
+${NEURON_VARYINGS}
+${HOLO}
+
+void main() {
+  vec2 p = vUv;
+  float r = length(p);
+  bool isAttachment = vKind > 1.5 && vKind < 2.5;
+  bool isUnresolved = vKind > 2.5;
+  float px = max(vPx, 1.0);
+  float shapeR = isAttachment ? max(abs(p.x), abs(p.y)) * 1.1 : r;
+  float aa = max(fwidth(shapeR), 0.004) * 1.4;
+  float inside = 1.0 - smoothstep(1.0 - aa, 1.0, shapeR);
+  if (inside <= 0.001) discard;
+
+  // bright outline about a pixel wide, a faint body and a hot core
+  float lw = clamp(1.1 / px, 0.02, 0.45);
+  float rim = 1.0 - smoothstep(lw, lw + aa, abs(shapeR - (1.0 - lw)));
+  float body = 0.1 + 0.12 * pow(r, 3.0);
+  float core = exp(-r * r * 16.0) * (isUnresolved ? 0.0 : 0.9);
+
+  // a slowly spinning wireframe globe, only when the neuron is big enough to read it
+  float wire = 0.0;
+  if (!isAttachment) {
+    float sy = clamp(p.y, -0.995, 0.995);
+    float lat = asin(sy) * 0.955;
+    float ring = sqrt(1.0 - sy * sy);
+    float lon = (asin(clamp(p.x / max(ring, 1e-3), -1.0, 1.0)) + uTime * 0.35 + vSeed * 6.283) * 0.955;
+    float dl = abs(fract(lat + 0.5) - 0.5) / max(fwidth(lat), 1e-4);
+    float dm = abs(fract(lon) - 0.5) / max(fwidth(lon), 1e-4);
+    wire = (1.0 - smoothstep(0.6, 1.6, min(dl, dm))) * smoothstep(9.0, 30.0, px) * 0.55;
+  }
+
+  float k = rim * 0.95 + body + core + wire;
+  if (isUnresolved) k = rim * 0.6;
+  // the projection is not perfectly stable
+  float flick = 1.0 - uInterf * 0.5 * step(0.985, holoHash(vec2(floor(uTime * 14.0), vSeed * 91.0)));
+  float scan = 1.0 - uInterf * 0.3 * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.7 - uTime * 9.0));
+  vec3 col = holoTint(vColor);
+  if (vState > 1.5 && vState < 2.5) col = mix(col, vec3(1.0), 0.45);
+  if (vState > 2.5) k *= 1.35;
+  float fade = (1.0 - vFog * 0.85) * (1.0 - vDim * 0.88);
+  gl_FragColor = vec4(col * k * inside * flick * scan * fade * 0.85, 1.0);
+}
+`
+
+export const holoHaloFragment = /* glsl */ `
+uniform float uTime;
+${NEURON_VARYINGS}
+${HOLO}
+
+void main() {
+  float r = length(vUv);
+  if (r < 0.98) discard;
+  bool isMoc = vKind > 0.5 && vKind < 1.5;
+  float px = max(vPx, 1.0);
+  float a = atan(vUv.y, vUv.x) / 6.2832 + 0.5;
+  float glow = exp(-(r - 1.0) * 3.0) * 0.09;
+  float k = 0.0;
+  if (isMoc) {
+    // four corner brackets around the hubs
+    float br = 1.0 - smoothstep(0.9 / px, 1.8 / px, abs(r - 1.5));
+    k += br * step(0.62, abs(fract(a * 4.0) - 0.5) * 2.0) * 0.55;
+    glow += exp(-(r - 1.0) * 2.0) * 0.05;
+  }
+  if (vState > 1.5 && vState < 2.5) {
+    // rotating dashed targeting ring
+    float ring = 1.0 - smoothstep(0.8 / px, 1.8 / px, abs(r - 1.4));
+    k += ring * step(0.5, fract(a * 18.0 + uTime * 0.25)) * 1.1;
+    float outer = 1.0 - smoothstep(0.5 / px, 1.4 / px, abs(r - 1.75));
+    k += outer * step(0.85, fract(a * 4.0 - uTime * 0.12)) * 0.9;
+    glow += exp(-(r - 1.0) * 2.4) * 0.2;
+  } else if (vState > 2.5) {
+    float ring = 1.0 - smoothstep(0.8 / px, 1.8 / px, abs(r - 1.35));
+    k += ring * 0.6;
+  }
+  k *= smoothstep(3.0, 7.0, px);
+  k += glow;
+  k *= (1.0 - vFog * 0.85) * (1.0 - vDim * 0.9);
+  if (k < 0.002) discard;
+  gl_FragColor = vec4(mix(holoTint(vColor), vec3(1.0), 0.3) * k, 1.0);
+}
+`
+
+export const holoSynapseFragment = /* glsl */ `
+uniform float uTime;
+uniform float uPulses;
+varying float vSide;
+varying float vT;
+varying vec3 vColor;
+varying float vAlpha;
+varying float vSeed;
+varying float vState;
+${HOLO}
+
+void main() {
+  float core = exp(-vSide * vSide * 3.0);
+  float hl = vState > 0.5 ? 1.0 : 0.0;
+  // dashes of light streaming from source to target
+  float flow = fract(vT * 10.0 - uTime * (0.25 + hl * 0.9) - vSeed * 5.0);
+  float dash = mix(0.35, 1.0, step(0.5, flow));
+  float packet = pow(1.0 - fract(vT - uTime * 0.3 - vSeed), 24.0) * (0.4 + uPulses);
+  vec3 col = holoTint(vColor);
+  gl_FragColor = vec4(col * core * (dash + packet * 2.0) * (1.0 + hl * 0.6), vAlpha * 1.2);
+}
+`
+
+/** Projection floor: a fine grid with major lines, concentric rings and a slow radar pulse. */
+export const gridVertex = /* glsl */ `
+varying vec3 vW;
+void main() {
+  vec4 w = modelMatrix * vec4(position, 1.0);
+  vW = w.xyz;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}
+`
+
+export const gridFragment = /* glsl */ `
+uniform float uTime;
+uniform float uR;
+uniform float uCell;
+varying vec3 vW;
+float gridLine(float x) {
+  float d = abs(fract(x - 0.5) - 0.5) / max(fwidth(x), 1e-4);
+  return 1.0 - min(d, 1.0);
+}
+void main() {
+  vec2 p = vW.xz / uCell;
+  float d = length(vW.xz) / uR;
+  float minor = max(gridLine(p.x), gridLine(p.y)) * 0.22;
+  float major = max(gridLine(p.x / 5.0), gridLine(p.y / 5.0)) * 0.5;
+  float rings = gridLine(d * 8.0) * 0.35 * (1.0 - smoothstep(0.0, 0.6, d));
+  float sweep = exp(-pow((d - fract(uTime * 0.06) * 1.3) * 14.0, 2.0)) * 0.5;
+  float fade = 1.0 - smoothstep(0.25, 1.0, d);
+  vec3 col = vec3(0.3, 0.78, 1.0) * (minor + major + rings + sweep) * fade;
+  gl_FragColor = vec4(col * 0.32, 1.0);
+}
+`

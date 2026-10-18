@@ -26,5 +26,20 @@ export const icons = {
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   copy: svg('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>'),
   pen: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
-  vault: svg('<path d="M12 3c-4 0-7 2.5-7 6 0 2 1 3.5 2.5 4.5V18a3 3 0 0 0 3 3h3a3 3 0 0 0 3-3v-4.5C18 12.5 19 11 19 9c0-3.5-3-6-7-6z"/><path d="M9.5 10.5h.01M14.5 10.5h.01"/>')
+  vault: svg('<path d="M12 3c-4 0-7 2.5-7 6 0 2 1 3.5 2.5 4.5V18a3 3 0 0 0 3 3h3a3 3 0 0 0 3-3v-4.5C18 12.5 19 11 19 9c0-3.5-3-6-7-6z"/><path d="M9.5 10.5h.01M14.5 10.5h.01"/>'),
+  nebula: svg('<circle cx="12" cy="12" r="2.5"/><ellipse cx="12" cy="12" rx="9.5" ry="4" transform="rotate(-25 12 12)"/><path d="M5 5.5h.01M19 18.5h.01M18.5 5h.01"/>'),
+  minimal: svg('<circle cx="6" cy="7" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="11" cy="18" r="2"/><path d="M8 7.2l8 .6M7 8.8l3 7.4M16.8 9.7l-4.6 6.6"/>'),
+  hologram: svg('<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><circle cx="12" cy="12" r="3.5"/><path d="M8.5 12h7"/>'),
+  palette: svg('<path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-.5-.2-.9-.5-1.3-.3-.3-.5-.8-.5-1.3 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-7.8-9-7.8z"/><path d="M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01"/>'),
+  graph: svg('<circle cx="5" cy="12" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M7 11l9-4M7 13l9 4"/>'),
+  move: svg('<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>'),
+  keyboard: svg('<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/>'),
+  info: svg('<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'),
+  sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon: svg('<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>'),
+  monitor: svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
+  zoomIn: svg('<path d="M12 5v14M5 12h14"/>'),
+  zoomOut: svg('<path d="M5 12h14"/>'),
+  fit: svg('<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>'),
+  reset: svg('<path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/>')
 }

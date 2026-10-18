@@ -5,15 +5,23 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
-import type { AppSettings, GraphNode } from '@shared/types'
+import type { AppSettings, GraphNode, ViewMode } from '@shared/types'
 import {
   dustFragment,
   dustVertex,
   filmShader,
+  gridFragment,
+  gridVertex,
   hazeFragment,
   hazeVertex,
   haloFragment,
   haloVertex,
+  holoHaloFragment,
+  holoNeuronFragment,
+  holoSynapseFragment,
+  minimalHaloFragment,
+  minimalNeuronFragment,
+  minimalSynapseFragment,
   neuronFragment,
   neuronVertex,
   skyFragment,
@@ -23,6 +31,7 @@ import {
 } from './shaders'
 import type { LayoutOut, LayoutStart } from './layout.worker'
 import { Labels } from './Labels'
+import { backgroundOf, isLight } from './views'
 
 const KIND_CODE: Record<GraphNode['kind'], number> = { note: 0, moc: 1, attachment: 2, unresolved: 3 }
 const STATE = { idle: 0, linked: 1, selected: 2, hovered: 3 } as const
@@ -42,6 +51,17 @@ export interface BrainGraph {
   known: Map<string, [number, number, number]>
   /** Group order used to place cluster anchors (largest first). */
   groups: string[]
+  /** Lay the network out on a flat 2D map. */
+  flat: boolean
+  /** Starting energy of the layout; by default it depends on how much of the layout is already known. */
+  alpha?: number
+}
+
+/** Fragment shaders and blending of each view (the vertex stage is shared). */
+const LOOKS: Record<ViewMode, { neuron: string; halo: string; synapse: string }> = {
+  nebula: { neuron: neuronFragment, halo: haloFragment, synapse: synapseFragment },
+  minimal: { neuron: minimalNeuronFragment, halo: minimalHaloFragment, synapse: minimalSynapseFragment },
+  hologram: { neuron: holoNeuronFragment, halo: holoHaloFragment, synapse: holoSynapseFragment }
 }
 
 interface Flight {
@@ -96,6 +116,13 @@ export class Brain {
   private dust: THREE.Points
   private dustMat: THREE.ShaderMaterial
   private sky: THREE.Mesh
+  private grid: THREE.Mesh
+  private gridMat: THREE.ShaderMaterial
+  private uniforms: Record<string, THREE.IUniform>
+  private view: ViewMode | null = null
+  private light = false
+  /** Whether the current layout is a flat 2D map. */
+  layoutFlat = false
 
   // interaction state
   selected = -1
@@ -157,8 +184,11 @@ export class Brain {
       uBg: { value: bg },
       uFocus: { value: 1000 },
       uDof: { value: 0.7 },
-      uAtmos: { value: 1 }
+      uAtmos: { value: 1 },
+      uLight: { value: 0 },
+      uInterf: { value: 0 }
     }
+    this.uniforms = sharedUniforms
     // solid soma: opaque, writes depth so neurons and synapses occlude each other properly
     this.neuronMat = new THREE.ShaderMaterial({
       uniforms: { ...sharedUniforms, uQuad: { value: 1 } },
@@ -262,6 +292,22 @@ export class Brain {
     this.hazeMesh.renderOrder = -3
     this.root.add(this.hazeMesh)
 
+    // hologram: projection grid on the floor below the network
+    this.gridMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: sharedUniforms.uTime, uR: { value: 2000 }, uCell: { value: 40 } },
+      vertexShader: gridVertex,
+      fragmentShader: gridFragment,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide
+    })
+    this.grid = new THREE.Mesh(new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2), this.gridMat)
+    this.grid.renderOrder = -4
+    this.grid.frustumCulled = false
+    this.grid.visible = false
+    this.scene.add(this.grid)
+
     // multisampled target: antialiases sphere edges (alpha-to-coverage) and thin synapses
     const target = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 })
     this.composer = new EffectComposer(this.renderer, target)
@@ -313,15 +359,24 @@ export class Brain {
       this.radii[i] = base + 0.62 * Math.log2(1 + degree[i]) + 0.18 * Math.log10(1 + node.words)
     })
 
-    // cluster anchors on a squashed Fibonacci sphere: the clusters become "lobes"
-    const anchorRadius = 34 * Math.cbrt(n)
-    this.boundsRadius = anchorRadius * 1.35
+    // cluster anchors on a squashed Fibonacci sphere: the clusters become "lobes";
+    // on a flat map they sit on a sunflower spiral instead, the largest region in the middle
+    const flat = graph.flat
+    const flatChanged = flat !== this.layoutFlat
+    this.layoutFlat = flat
+    const anchorRadius = flat ? 13 * Math.sqrt(n) : 34 * Math.cbrt(n)
+    this.boundsRadius = anchorRadius * (flat ? 1.1 : 1.35)
     const anchorOf = new Map<string, [number, number, number]>()
     const g = graph.groups.length
     graph.groups.forEach((group, i) => {
+      const theta = i * Math.PI * (3 - Math.sqrt(5))
+      if (flat) {
+        const rr = g === 1 ? 0 : Math.sqrt(i / (g - 1))
+        anchorOf.set(group, [Math.cos(theta) * rr * anchorRadius * 1.3, Math.sin(theta) * rr * anchorRadius, 0])
+        return
+      }
       const y = g === 1 ? 0 : 1 - (i / (g - 1)) * 2
       const rr = Math.sqrt(1 - y * y)
-      const theta = i * Math.PI * (3 - Math.sqrt(5))
       anchorOf.set(group, [Math.cos(theta) * rr * anchorRadius * 1.25, y * anchorRadius * 0.8, Math.sin(theta) * rr * anchorRadius])
     })
 
@@ -344,10 +399,10 @@ export class Brain {
       if (!Number.isNaN(init[i * 3])) return
       const placed = this.neighbours[i].find((j) => !Number.isNaN(init[j * 3]))
       if (placed !== undefined && knownCount > 0) {
-        for (let d = 0; d < 3; d++) init[i * 3 + d] = init[placed * 3 + d] + (Math.random() - 0.5) * 20
+        for (let d = 0; d < 3; d++) init[i * 3 + d] = init[placed * 3 + d] + (d === 2 && flat ? 0 : (Math.random() - 0.5) * 20)
         this.positions.set(init.subarray(i * 3, i * 3 + 3), i * 3)
       } else if (knownCount > 0) {
-        for (let d = 0; d < 3; d++) init[i * 3 + d] = anchors[i * 3 + d] + (Math.random() - 0.5) * 40
+        for (let d = 0; d < 3; d++) init[i * 3 + d] = anchors[i * 3 + d] + (d === 2 && flat ? 0 : (Math.random() - 0.5) * 40)
         this.positions.set(init.subarray(i * 3, i * 3 + 3), i * 3)
       }
     })
@@ -375,22 +430,53 @@ export class Brain {
       init,
       anchors,
       degree,
-      alpha: coverage > 0.95 ? 0.06 : coverage > 0.5 ? 0.35 : 1
+      alpha: graph.alpha ?? (coverage > 0.95 ? 0.06 : coverage > 0.5 ? 0.35 : 1),
+      flat
     }
     this.layoutRunning = true
     this.worker.postMessage(msg)
     this.rebuildHaze()
+    this.applyNavigation()
 
     if (intro) {
-      this.camera.position.set(0, this.boundsRadius * 0.5, this.boundsRadius * 7)
+      this.camera.position.copy(this.homeOffset().multiplyScalar(2.6))
       this.controls.target.set(0, 0, 0)
-      this.flyTo(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.0, 0.32, 1).normalize().multiplyScalar(this.boundsRadius * 2.7), 3200)
+      this.flyTo(new THREE.Vector3(0, 0, 0), this.homeOffset(), 3200)
+    } else if (flatChanged) {
+      // the shape changed under the camera: follow the selected neuron, or go back to the overview
+      if (this.selected >= 0) this.flyToNode(this.selected)
+      else this.flyTo(new THREE.Vector3(0, 0, 0), this.homeOffset(), 1600)
     }
   }
 
   relayout(): void {
     const known = new Map<string, [number, number, number]>()
-    this.setGraph({ nodes: this.nodes, links: this.links, colors: this.colors, known, groups: this.groupOrder() }, false)
+    this.setGraph(
+      { nodes: this.nodes, links: this.links, colors: this.colors, known, groups: this.groupOrder(), flat: this.layoutFlat },
+      false
+    )
+  }
+
+  /** Camera offset from the centre for the overview: slightly from above in 3D, straight on for a flat map. */
+  private homeOffset(): THREE.Vector3 {
+    const dir = this.layoutFlat ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 0.32, 1).normalize()
+    return dir.multiplyScalar(this.boundsRadius * (this.layoutFlat ? 2.3 : 2.7))
+  }
+
+  /** A flat map is panned and zoomed, never rotated. */
+  private applyNavigation(): void {
+    const flat = this.layoutFlat
+    this.controls.enableRotate = !flat
+    this.controls.mouseButtons.LEFT = flat ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE
+    this.controls.touches.ONE = flat ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE
+  }
+
+  /** Zooms towards the orbit target (factor < 1 gets closer). */
+  zoom(factor: number): void {
+    const offset = this.camera.position.clone().sub(this.controls.target)
+    const dist = THREE.MathUtils.clamp(offset.length() * factor, this.controls.minDistance, this.controls.maxDistance)
+    this.lastInteraction = performance.now()
+    this.flyTo(this.controls.target.clone(), offset.setLength(dist), 380)
   }
 
   private groupOrder(): string[] {
@@ -525,25 +611,98 @@ export class Brain {
   /** Scales dust and clouds to the size of the network. */
   private fitVolume(): void {
     this.dust.scale.setScalar(Math.max(this.boundsRadius, 120))
+    // the hologram floor sits just below the lowest neurons
+    let minY = 0
+    for (let i = 1; i < this.positions.length; i += 3) minY = Math.min(minY, this.positions[i])
+    const r = Math.max(this.boundsRadius, 120)
+    this.grid.position.y = minY - r * 0.12
+    this.grid.scale.setScalar(r * 3.2)
+    this.gridMat.uniforms.uR.value = r * 3.2
+    this.gridMat.uniforms.uCell.value = r / 7
   }
 
   applySettings(s: AppSettings): void {
     this.settings = s
+    const light = isLight(s)
+    if (s.view !== this.view || light !== this.light) this.setLook(s.view, light)
+    const u = this.uniforms
     const atmos = s.atmosphere ?? 1
-    this.hazeMat.uniforms.uHaze.value = atmos * 1.1
-    this.dustMat.uniforms.uDust.value = atmos
-    this.neuronMat.uniforms.uAtmos.value = atmos
-    this.neuronMat.uniforms.uDof.value = s.dof ?? 0.7
-    this.film.uniforms.uGrain.value = (s.grain ?? 0.5) * 0.06
-    this.synapseMat.uniforms.uOpacity.value = s.linkOpacity
+    if (s.view === 'nebula') {
+      this.hazeMat.uniforms.uHaze.value = atmos * 1.1
+      this.dustMat.uniforms.uDust.value = atmos
+      u.uAtmos.value = atmos
+      u.uDof.value = s.dof ?? 0.7
+      this.film.uniforms.uGrain.value = (s.grain ?? 0.5) * 0.06
+      this.film.uniforms.uVignette.value = 0.35
+      this.film.uniforms.uScan.value = 0
+      this.film.uniforms.uAberr.value = 1
+      this.synapseMat.uniforms.uCurve.value = 1
+    } else if (s.view === 'hologram') {
+      const k = s.interference ?? 0.6
+      this.dustMat.uniforms.uDust.value = 0.35
+      u.uAtmos.value = 0
+      u.uDof.value = 0.2
+      u.uInterf.value = k
+      this.film.uniforms.uGrain.value = 0.012 + k * 0.02
+      this.film.uniforms.uVignette.value = 0.45
+      this.film.uniforms.uScan.value = k
+      this.film.uniforms.uAberr.value = 1 + k * 7
+      this.synapseMat.uniforms.uCurve.value = 0.55
+      this.grid.visible = s.grid
+    } else {
+      u.uAtmos.value = 0
+      u.uDof.value = 0
+      this.synapseMat.uniforms.uCurve.value = 0
+    }
+    this.synapseMat.uniforms.uOpacity.value = s.linkOpacity * (s.view === 'minimal' ? (light ? 1.1 : 0.9) : 1)
     this.synapseMat.uniforms.uPulses.value = s.pulses ? 1 : 0
-    this.neuronMat.uniforms.uScale.value = s.nodeScale
+    u.uScale.value = s.nodeScale
     this.labels.setEnabled(s.labels)
+  }
+
+  /** Switches shaders, blending and the extra layers (haze, dust, grid, post-processing) to another view. */
+  private setLook(view: ViewMode, light: boolean): void {
+    this.view = view
+    this.light = light
+    const look = LOOKS[view]
+    const bg = backgroundOf(view, light)
+    ;(this.uniforms.uBg.value as THREE.Color).set(bg)
+    this.uniforms.uLight.value = light ? 1 : 0
+    // three encodes the clear colour for the screen even when clearing the linear render target,
+    // so pre-linearise it once more to get the exact background after the output pass
+    this.renderer.setClearColor(new THREE.Color(bg).convertSRGBToLinear())
+
+    const additive = view !== 'minimal'
+    // nebula: opaque solid spheres; minimal: discs drawn over the links; hologram: everything adds light
+    this.neuronMat.fragmentShader = look.neuron
+    this.neuronMat.transparent = view !== 'nebula'
+    this.neuronMat.alphaToCoverage = view === 'nebula'
+    this.neuronMat.depthWrite = view !== 'hologram'
+    this.neuronMat.blending = view === 'hologram' ? THREE.AdditiveBlending : THREE.NormalBlending
+    this.haloMat.fragmentShader = look.halo
+    this.haloMat.blending = additive ? THREE.AdditiveBlending : THREE.NormalBlending
+    this.synapseMat.fragmentShader = look.synapse
+    this.synapseMat.blending = additive ? THREE.AdditiveBlending : THREE.NormalBlending
+    for (const m of [this.neuronMat, this.haloMat, this.synapseMat]) m.needsUpdate = true
+    if (this.synapseMesh) this.synapseMesh.renderOrder = this.synapseOrder()
+
+    if (this.hazeMesh) this.hazeMesh.visible = view === 'nebula'
+    this.dust.visible = view !== 'minimal'
+    this.sky.visible = view !== 'minimal'
+    this.grid.visible = view === 'hologram' && this.settings.grid
+    this.bloom.enabled = view !== 'minimal'
+    this.film.enabled = view !== 'minimal'
+    this.renderer.toneMapping = view === 'minimal' ? THREE.NoToneMapping : THREE.NeutralToneMapping
+  }
+
+  /** In the minimal view links are drawn before (under) the discs. */
+  private synapseOrder(): number {
+    return this.view === 'minimal' ? -1 : 2
   }
 
   resetView(): void {
     this.select(null)
-    this.flyTo(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.0, 0.32, 1).normalize().multiplyScalar(this.boundsRadius * 2.7), 1600)
+    this.flyTo(new THREE.Vector3(0, 0, 0), this.homeOffset(), 1600)
   }
 
   /** Approximate bounds of the current layout, for camera framing. */
@@ -653,7 +812,7 @@ export class Brain {
     geo.setIndex(new THREE.BufferAttribute(index, 1))
     this.synapseMesh = new THREE.Mesh(geo, this.synapseMat)
     this.synapseMesh.frustumCulled = false
-    this.synapseMesh.renderOrder = 2
+    this.synapseMesh.renderOrder = this.synapseOrder()
     this.root.add(this.synapseMesh)
     this.positionsDirty = true
   }
@@ -763,7 +922,9 @@ export class Brain {
     // frame the neuron together with its neighbourhood
     const dists = this.neighbours[i].map((j) => this.nodeWorld(j).distanceTo(target)).sort((a, b) => a - b)
     const extent = dists.length ? dists[Math.floor(dists.length * 0.8)] : 0
-    const dist = THREE.MathUtils.clamp(extent * (dists.length > 20 ? 2.4 : 1.6), this.radii[i] * 14, 1100)
+    // a flat map has no depth to spread the neighbourhood, so it needs a wider frame
+    const k = (dists.length > 20 ? 2.4 : 1.6) * (this.layoutFlat ? 1.7 : 1)
+    const dist = THREE.MathUtils.clamp(extent * k, this.radii[i] * (this.layoutFlat ? 24 : 14), this.layoutFlat ? 1800 : 1100)
     const dir = this.camera.position.clone().sub(this.controls.target).normalize()
     if (!Number.isFinite(dir.x) || dir.lengthSq() === 0) dir.set(0, 0, 1)
     this.flyTo(target, dir.multiplyScalar(dist))
@@ -858,6 +1019,7 @@ export class Brain {
     this.composer.setPixelRatio(this.renderer.getPixelRatio())
     this.bloom.resolution.set(w, h)
     this.film.uniforms.uAspect.value = w / h
+    this.film.uniforms.uHeight.value = h
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
   }
@@ -910,9 +1072,15 @@ export class Brain {
       const up = new THREE.Vector3().crossVectors(right, fwd).normalize()
       const move = new THREE.Vector3()
       const has = (...k: string[]): number => (k.some((x) => this.keys.has(x)) ? 1 : 0)
-      move.addScaledVector(fwd, has('w', 'arrowup') - has('s', 'arrowdown'))
+      if (this.layoutFlat) {
+        // on a map W/S move up and down, Q/E zoom
+        move.addScaledVector(up, has('w', 'arrowup') - has('s', 'arrowdown'))
+        move.addScaledVector(fwd, has('e') - has('q'))
+      } else {
+        move.addScaledVector(fwd, has('w', 'arrowup') - has('s', 'arrowdown'))
+        move.addScaledVector(up, has('e') - has('q'))
+      }
       move.addScaledVector(right, has('d', 'arrowright') - has('a', 'arrowleft'))
-      move.addScaledVector(up, has('e') - has('q'))
       if (move.lengthSq() > 0) {
         const dist = this.camera.position.distanceTo(this.controls.target)
         const speed = THREE.MathUtils.clamp(dist * 0.8, 40, 2000) * (this.keys.has('shift') ? 3 : 1)
@@ -923,7 +1091,7 @@ export class Brain {
     }
 
     const idle = performance.now() - this.lastInteraction > 4000
-    this.controls.autoRotate = this.settings.autoRotate && this.selected < 0 && !this.flight && idle
+    this.controls.autoRotate = this.settings.autoRotate && !this.layoutFlat && this.selected < 0 && !this.flight && idle
     this.controls.update(dt)
 
     // fog distance follows the zoom level
@@ -938,7 +1106,7 @@ export class Brain {
 
     // a touch of bloom on highlights only, weaker when inside a dense cluster
     const zoomOut = THREE.MathUtils.smoothstep(camDist / this.boundsRadius, 0.15, 1.8)
-    this.bloom.strength = 0.3 * this.settings.bloom * THREE.MathUtils.lerp(0.3, 1, zoomOut)
+    this.bloom.strength = (this.view === 'hologram' ? 0.55 : 0.3) * this.settings.bloom * THREE.MathUtils.lerp(0.3, 1, zoomOut)
 
     this.sky.position.copy(this.camera.position)
     this.dust.rotation.y = time * 0.002

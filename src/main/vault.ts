@@ -189,7 +189,7 @@ export interface NoteText {
 }
 
 export interface VaultScan {
-  graph: Omit<VaultGraph, 'positions'>
+  graph: Omit<VaultGraph, 'positions' | 'positions2d'>
   resolver: Resolver
   notes: Map<string, NoteText>
 }

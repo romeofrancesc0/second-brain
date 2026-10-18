@@ -24,28 +24,22 @@
         <div class="title-actions">
           <button id="agent-btn" class="agent-trigger" title="Agente AI (⌘J)"></button>
           <button id="search-btn" class="search-trigger" title="Cerca (⌘K)"></button>
-          <button id="home-btn" class="icon-btn" title="Vista d'insieme (H)"></button>
-          <button id="settings-btn" class="icon-btn" title="Impostazioni"></button>
+          <button id="settings-btn" class="icon-btn" title="Impostazioni (⌘,)"></button>
         </div>
       </header>
 
       <aside id="legend" class="glass legend"></aside>
       <aside id="agent" class="glass agent-panel hidden"></aside>
       <aside id="panel" class="glass panel hidden"></aside>
-      <div id="settings" class="glass popover hidden"></div>
+      <div id="dock" class="dock glass"></div>
+      <div id="settings" class="settings-backdrop hidden"></div>
       <div id="palette" class="palette-backdrop hidden"></div>
 
       <div id="progress" class="progress hidden">
         <div class="bar"><i></i></div>
         <span>Lettura del vault…</span>
       </div>
-      <div class="hint">
-        <span><kbd>trascina</kbd> ruota</span>
-        <span><kbd>scroll</kbd> zoom</span>
-        <span><kbd>W A S D</kbd> vola</span>
-        <span><kbd>click</kbd> apri neurone</span>
-        <span><kbd>H</kbd> vista d'insieme</span>
-      </div>
+      <div id="hint" class="hint"></div>
       <div id="toast" class="toast hidden"></div>
       <div id="welcome" class="welcome hidden"></div>
     </div>

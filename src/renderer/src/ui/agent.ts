@@ -117,6 +117,12 @@ export class AgentPanel {
     }
   }
 
+  /** Opens the panel straight on the model settings. */
+  openSettings(): void {
+    this.toggle(true)
+    this.showSettings(true)
+  }
+
   /* ---------------------------------------------------------------- status */
 
   private async refreshStatus(): Promise<void> {

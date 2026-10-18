@@ -24,8 +24,8 @@ let watcher: FSWatcher | null = null
 let agent: ReturnType<typeof registerAgent> | null = null
 
 const configPath = (): string => join(app.getPath('userData'), 'config.json')
-const layoutPath = (vault: string): string =>
-  join(app.getPath('userData'), 'layouts', createHash('sha1').update(vault).digest('hex') + '.json')
+const layoutPath = (vault: string, flat = false): string =>
+  join(app.getPath('userData'), 'layouts', createHash('sha1').update(vault).digest('hex') + (flat ? '-2d' : '') + '.json')
 
 interface Config {
   lastVault?: string
@@ -72,8 +72,11 @@ async function loadGraph(vault: string): Promise<VaultGraph> {
   currentResolver = resolver
   knowledge = new VaultKnowledge(vault, scan)
   agent?.onScan(knowledge)
-  const positions = await readJson<VaultGraph['positions']>(layoutPath(vault), {})
-  return { ...graph, positions }
+  const [positions, positions2d] = await Promise.all([
+    readJson<VaultGraph['positions']>(layoutPath(vault), {}),
+    readJson<VaultGraph['positions']>(layoutPath(vault, true), {})
+  ])
+  return { ...graph, positions, positions2d }
 }
 
 function watchVault(vault: string): void {
@@ -137,8 +140,16 @@ function registerIpc(): void {
     const links = currentResolver ? resolveNoteLinks(currentResolver, id, src) : {}
     return { id, markdown: body, frontmatter, links, mtime: stat.mtimeMs }
   })
-  ipcMain.handle('layout:save', async (_e, positions: VaultGraph['positions']) => {
-    if (currentVault) await writeJson(layoutPath(currentVault), positions)
+  ipcMain.handle('layout:save', async (_e, positions: VaultGraph['positions'], flat?: boolean) => {
+    if (currentVault) await writeJson(layoutPath(currentVault, !!flat), positions)
+  })
+  ipcMain.handle('window:theme', (_e, theme: 'dark' | 'light') => {
+    if (!mainWindow) return
+    const bg = theme === 'light' ? '#f4f4f1' : '#090b11'
+    mainWindow.setBackgroundColor(bg)
+    if (process.platform !== 'darwin') {
+      mainWindow.setTitleBarOverlay({ color: bg, symbolColor: theme === 'light' ? '#4a4f5c' : '#aeb3c2', height: 56 })
+    }
   })
   ipcMain.handle('settings:get', async () => {
     const cfg = await readJson<Config>(configPath(), {})

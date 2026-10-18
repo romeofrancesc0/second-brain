@@ -29,6 +29,8 @@ export interface VaultGraph {
   links: GraphLink[]
   /** Cached layout positions from a previous session, keyed by node id. */
   positions: Record<string, [number, number, number]>
+  /** Cached flat (2D map) layout, used by the minimal view. */
+  positions2d: Record<string, [number, number, number]>
   scannedAt: number
 }
 
@@ -49,7 +51,24 @@ export interface NoteContent {
   mtime: number
 }
 
+/** How the graph is drawn: cinematic 3D nebula, clean minimal map, or experimental hologram. */
+export type ViewMode = 'nebula' | 'minimal' | 'hologram'
+export type Tone = 'dark' | 'light' | 'system'
+
 export interface AppSettings {
+  view: ViewMode
+  /** Light or dark look of the minimal view (and of the whole interface while it is active). */
+  tone: Tone
+  /** Accent colour of the interface. */
+  accent: string
+  /** Minimal view: lay the network out on a flat 2D map instead of a 3D volume. */
+  flat: boolean
+  /** Hologram view: scanlines, flicker and colour fringing (0 = clean). */
+  interference: number
+  /** Hologram view: projection grid under the network. */
+  grid: boolean
+  /** Show the keyboard hints at the bottom of the window. */
+  hints: boolean
   bloom: number
   linkOpacity: number
   nodeScale: number
@@ -68,6 +87,13 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  view: 'nebula',
+  tone: 'system',
+  accent: '#8796d6',
+  flat: true,
+  interference: 0.6,
+  grid: true,
+  hints: true,
   bloom: 1,
   linkOpacity: 1,
   nodeScale: 1,
@@ -174,13 +200,15 @@ export interface SecondBrainApi {
   chooseVault(): Promise<string | null>
   loadVault(path: string): Promise<VaultGraph>
   readNote(id: string): Promise<NoteContent>
-  saveLayout(positions: Record<string, [number, number, number]>): Promise<void>
+  saveLayout(positions: Record<string, [number, number, number]>, flat?: boolean): Promise<void>
   getSettings(): Promise<AppSettings>
   saveSettings(settings: AppSettings): Promise<void>
   openInObsidian(id: string): Promise<void>
   openFile(id: string): Promise<void>
   revealInFinder(id: string): Promise<void>
   onVaultChanged(cb: (graph: VaultGraph) => void): () => void
+  /** Matches the native window chrome (Windows title bar buttons) to the interface theme. */
+  setWindowTheme(theme: 'dark' | 'light'): Promise<void>
 
   aiGetSettings(): Promise<AiSettings>
   aiSaveSettings(settings: AiSettings): Promise<void>

@@ -1,15 +1,17 @@
 import 'katex/dist/katex.min.css'
 import './styles.css'
 import type { Color } from 'three'
-import { DEFAULT_SETTINGS, type AppSettings, type GraphNode, type VaultGraph } from '@shared/types'
+import { DEFAULT_SETTINGS, type AppSettings, type GraphNode, type VaultGraph, type ViewMode } from '@shared/types'
 import { Brain } from './graph/Brain'
 import { AgentPanel } from './ui/agent'
 import { buildPalette } from './graph/palette'
+import { VIEWS, isFlat, isLight, onSystemToneChange } from './graph/views'
+import { Dock } from './ui/dock'
 import { icons } from './ui/icons'
 import { Legend } from './ui/legend'
 import { NotePanel } from './ui/panel'
 import { SearchPalette } from './ui/search'
-import { SettingsPopover } from './ui/settings'
+import { SettingsDialog } from './ui/settings'
 import { Welcome } from './ui/welcome'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector<T>(sel)!
@@ -32,17 +34,21 @@ document.documentElement.dataset.platform = /Mac/.test(navigator.userAgent) ? 'm
 
 async function boot(): Promise<void> {
   settings = { ...DEFAULT_SETTINGS, ...(await window.api.getSettings()) }
-  $('#search-btn').innerHTML = `${icons.search}<span>Cerca un neurone…</span><kbd>⌘K</kbd>`
+  const mod = document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl '
+  $('#search-btn').innerHTML = `${icons.search}<span>Cerca un neurone…</span><kbd>${mod}K</kbd>`
   $('#agent-btn').innerHTML = `${icons.agent}<span>Agente</span>`
-  $('#home-btn').innerHTML = icons.home
   $('#settings-btn').innerHTML = icons.sliders
+  applyTheme()
 
   brain = new Brain($('#stage'), $('#labels'), settings)
   const panel = new NotePanel($('#panel'))
   const search = new SearchPalette($('#palette'))
   const legend = new Legend($('#legend'))
-  const settingsUi = new SettingsPopover($('#settings'), settings)
+  const settingsUi = new SettingsDialog($('#settings'), settings)
   const welcome = new Welcome($('#welcome'))
+  const dock = new Dock($('#dock'))
+  dock.setView(settings.view)
+  paintHint()
   const agentPanel = new AgentPanel($('#agent'), {
     resolve: (target) => {
       const t = target.replace(/\.md$/i, '')
@@ -63,6 +69,7 @@ async function boot(): Promise<void> {
   })
 
   brain.onSelect = (id) => {
+    $('#app').classList.toggle('panel-open', !!id)
     if (!id) {
       panel.hide()
       return
@@ -85,7 +92,11 @@ async function boot(): Promise<void> {
     el.classList.toggle('hidden', done)
     ;($('#progress .bar i') as HTMLElement).style.width = `${Math.round(progress * 100)}%`
     $('#progress span').textContent = `Formazione della rete neurale… ${Math.round(progress * 100)}%`
-    if (done) void window.api.saveLayout(brain.getLayout())
+    if (done) {
+      const layout = brain.getLayout()
+      if (graph) graph[brain.layoutFlat ? 'positions2d' : 'positions'] = layout
+      void window.api.saveLayout(layout, brain.layoutFlat)
+    }
   }
 
   panel.onNavigate = (id) => {
@@ -97,19 +108,63 @@ async function boot(): Promise<void> {
   legend.onFocus = (g) => {
     if (brain.selected < 0) brain.setFocusGroup(g)
   }
-  settingsUi.onChange = (s, structural) => {
-    settings = s
-    brain.applySettings(s)
-    void window.api.saveSettings(s)
-    if (structural && graph) rebuild(false)
-  }
+  settingsUi.onChange = (s, structural) => commit(s, structural)
   settingsUi.onRelayout = () => {
-    settingsUi.hide()
+    settingsUi.close()
     brain.relayout()
   }
   settingsUi.onChangeVault = () => {
-    settingsUi.hide()
+    settingsUi.close()
     void welcome.show({ closable: !!graph })
+  }
+  settingsUi.onOpenAgent = () => {
+    settingsUi.close()
+    agentPanel.openSettings()
+  }
+  dock.onView = (view) => setView(view)
+  dock.onZoom = (f) => brain.zoom(f)
+  dock.onHome = () => brain.resetView()
+  onSystemToneChange(() => {
+    if (settings.view === 'minimal' && settings.tone === 'system') {
+      applyTheme()
+      brain.applySettings(settings)
+      settingsUi.update(settings)
+    }
+  })
+
+  /** Applies new settings everywhere; rebuilds the graph when nodes or the layout shape change. */
+  function commit(s: AppSettings, structural = false): void {
+    const prev = settings
+    settings = s
+    const reshape = isFlat(prev) !== isFlat(s)
+    const restyle = prev.view !== s.view || isLight(prev) !== isLight(s)
+    const apply = (): void => {
+      applyTheme()
+      brain.applySettings(s)
+      if ((structural || reshape) && graph) rebuild(false)
+      dock.setView(s.view)
+      paintHint()
+    }
+    // a short fade hides the swap of shaders and colours
+    if (restyle && graph) {
+      $('#stage').classList.add('fading')
+      $('#labels').classList.add('fading')
+      setTimeout(() => {
+        apply()
+        requestAnimationFrame(() => {
+          $('#stage').classList.remove('fading')
+          $('#labels').classList.remove('fading')
+        })
+      }, 160)
+    } else apply()
+    void window.api.saveSettings(s)
+  }
+
+  function setView(view: ViewMode): void {
+    if (view === settings.view) return
+    commit({ ...settings, view })
+    settingsUi.update(settings)
+    toast(`Vista ${VIEWS.find((v) => v.id === view)!.name}`)
   }
   welcome.onOpen = (path) => {
     welcome.hide()
@@ -118,38 +173,53 @@ async function boot(): Promise<void> {
 
   $('#search-btn').addEventListener('click', () => search.open())
   $('#agent-btn').addEventListener('click', () => agentPanel.toggle())
-  $('#home-btn').addEventListener('click', () => brain.resetView())
-  $('#settings-btn').addEventListener('click', (e) => {
-    e.stopPropagation()
-    settingsUi.toggle()
-  })
+  $('#settings-btn').addEventListener('click', () => settingsUi.toggle())
   $('#vault-btn').addEventListener('click', () => void welcome.show({ closable: !!graph }))
-  document.addEventListener('mousedown', (e) => {
-    if (settingsUi.isOpen && !(e.target as HTMLElement).closest('#settings, #settings-btn')) settingsUi.hide()
-  })
 
   window.addEventListener('keydown', (e) => {
-    const typing = (e.target as HTMLElement).tagName === 'INPUT'
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
+    const t = e.target as HTMLElement
+    const typing = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable
+    const cmd = e.metaKey || e.ctrlKey
+    if (cmd && e.key.toLowerCase() === 'j') {
       e.preventDefault()
+      settingsUi.close()
       agentPanel.toggle()
       return
     }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    if (cmd && e.key.toLowerCase() === 'k') {
       e.preventDefault()
+      settingsUi.close()
       if (search.isOpen) search.close()
       else search.open()
       return
     }
-    if (typing) return
-    if (e.key === '/') {
+    if (cmd && e.key === ',') {
+      e.preventDefault()
+      settingsUi.toggle()
+      return
+    }
+    if (e.key === 'Escape' && settingsUi.isOpen) {
+      settingsUi.close()
+      return
+    }
+    if (typing || cmd || e.altKey) return
+    if (settingsUi.isOpen) return
+    const view = VIEWS.find((v) => v.key === e.key)
+    if (view) {
+      setView(view.id)
+    } else if (e.key === '/') {
       e.preventDefault()
       search.open()
+    } else if (e.key === '?') {
+      settingsUi.open('keys')
+    } else if (e.key === '+' || e.key === '=') {
+      brain.zoom(0.7)
+    } else if (e.key === '-') {
+      brain.zoom(1 / 0.7)
     } else if (e.key === 'Escape') {
-      if (settingsUi.isOpen) settingsUi.hide()
-      else if (brain.selected >= 0) brain.select(null, false)
+      if (brain.selected >= 0) brain.select(null, false)
       else brain.setAgentFocus([], false)
-    } else if (e.key.toLowerCase() === 'h' && !e.metaKey) {
+    } else if (e.key.toLowerCase() === 'h') {
       brain.resetView()
     } else if (e.key === 'f' && brain.selected >= 0) {
       brain.flyToNode(brain.selected)
@@ -199,12 +269,22 @@ async function boot(): Promise<void> {
     shownIds = ids
     const index = new Map(nodes.map((n, i) => [n.id, i]))
 
-    // keep the current layout when rebuilding, fall back to the cached one
+    // keep the current layout when rebuilding, fall back to the cached one; switching between
+    // the 3D volume and the flat map uses that shape's cache, or morphs the current layout
+    const flat = isFlat(settings)
     const known = new Map<string, [number, number, number]>()
-    if (brain.nodes.length) {
+    const cache = flat ? graph.positions2d : graph.positions
+    let alpha: number | undefined
+    if (brain.nodes.length && brain.layoutFlat === flat) {
       brain.nodes.forEach((n, i) => known.set(n.id, [brain.positions[i * 3], brain.positions[i * 3 + 1], brain.positions[i * 3 + 2]]))
+    } else if (nodes.filter((n) => cache[n.id]).length > nodes.length * 0.8 || !brain.nodes.length) {
+      for (const [id, p] of Object.entries(cache)) known.set(id, p)
     } else {
-      for (const [id, p] of Object.entries(graph.positions)) known.set(id, p)
+      const spread = flat ? 0 : 120
+      brain.nodes.forEach((n, i) =>
+        known.set(n.id, [brain.positions[i * 3], brain.positions[i * 3 + 1], brain.positions[i * 3 + 2] + (Math.random() - 0.5) * spread])
+      )
+      alpha = 0.6
     }
 
     brain.setGraph(
@@ -213,7 +293,9 @@ async function boot(): Promise<void> {
         links: links.map((l) => [index.get(l.source)!, index.get(l.target)!]),
         colors: palette,
         known,
-        groups: groupOrder
+        groups: groupOrder,
+        flat,
+        alpha
       },
       intro
     )
@@ -232,6 +314,7 @@ async function boot(): Promise<void> {
     const neurons = nodes.filter((n) => n.kind === 'note' || n.kind === 'moc').length
     $('#stats').innerHTML = `<b>${neurons.toLocaleString('it-IT')}</b> neuroni<span class="dot">·</span><b>${links.length.toLocaleString('it-IT')}</b> sinapsi`
     $('#vault-btn').innerHTML = `${icons.vault}<span>${esc(graph.vaultName)}</span>`
+    settingsUi.setVault(graph.vaultName, graph.vaultPath, neurons, links.length)
     $('#app').classList.add('ready')
   }
 
@@ -254,7 +337,7 @@ async function boot(): Promise<void> {
   }
 
   // the shortcut hints fade away after a while or at the first interaction
-  const hideHint = (): void => $('.hint').classList.add('gone')
+  const hideHint = (): void => $('#hint').classList.add('gone')
   setTimeout(hideHint, 9000)
   window.addEventListener('keydown', hideHint, { once: true })
   $('#stage').addEventListener('pointerdown', hideHint, { once: true })
@@ -262,6 +345,31 @@ async function boot(): Promise<void> {
   const last = await window.api.getLastVault()
   if (last) void openVault(last, welcome)
   else void welcome.show()
+}
+
+/** Interface theme (light only in the minimal view), view-specific styling and accent colour. */
+function applyTheme(): void {
+  const root = document.documentElement
+  const light = isLight(settings)
+  root.dataset.theme = light ? 'light' : 'dark'
+  root.dataset.view = settings.view
+  root.style.setProperty('--brand', settings.accent)
+  void window.api.setWindowTheme(light ? 'light' : 'dark')
+}
+
+function paintHint(): void {
+  const el = $('#hint')
+  el.classList.toggle('off', !settings.hints)
+  const flat = isFlat(settings)
+  const items: [string, string][] = [
+    ['trascina', flat ? 'sposta' : 'ruota'],
+    ['scroll', 'zoom'],
+    ['W A S D', flat ? 'muovi' : 'vola'],
+    ['click', 'apri neurone'],
+    ['1 2 3', 'cambia vista'],
+    ['?', 'scorciatoie']
+  ]
+  el.innerHTML = items.map(([k, label]) => `<span><kbd>${k}</kbd> ${label}</span>`).join('')
 }
 
 let toastTimer: number | undefined
