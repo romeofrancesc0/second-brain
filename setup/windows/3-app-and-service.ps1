@@ -1,5 +1,5 @@
-# Installa l'app Second Brain dal repo GitHub e il servizio sempre attivo (agente + bot Telegram).
-#   .\3-app-e-servizio.ps1 -Vault "C:\Users\<te>\SECONDBRAIN"
+# Install the Second Brain app from the GitHub repo, plus the always-on service (agent + Telegram bot).
+#   .\3-app-and-service.ps1 -Vault "C:\Users\<you>\SECONDBRAIN"
 param(
   [Parameter(Mandatory = $true)][string]$Vault,
   [string]$Repo = 'https://github.com/romeofrancesc0/second-brain.git',
@@ -13,7 +13,7 @@ npm ci
 npm run app:win
 Write-Host "App: $Dir\dist\win-unpacked\Second Brain.exe" -ForegroundColor Green
 
-# configurazione del servizio
+# service configuration
 $data = "$env:APPDATA\Second Brain"
 New-Item -ItemType Directory -Force -Path $data | Out-Null
 $serverJson = "$data\server.json"
@@ -26,18 +26,18 @@ if (-not (Test-Path $configJson)) {
     ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $configJson
 }
 
-# avvio automatico al login, con riavvio se si ferma
+# start at login, restart if it stops
 $node = (Get-Command node).Source
 $action = New-ScheduledTaskAction -Execute $node -Argument "`"$Dir\out\main\server.js`"" -WorkingDirectory $Dir
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit 0 -AllowStartIfOnBatteries
-Register-ScheduledTask -TaskName 'Second Brain - servizio' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+Register-ScheduledTask -TaskName 'Second Brain - service' -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 
-# l'app si apre al login
+# open the app at login
 $lnk = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Second Brain.lnk"
 $sh = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
 $sh.TargetPath = "$Dir\dist\win-unpacked\Second Brain.exe"
 $sh.Save()
 
-Write-Host "`nModifica $serverJson con il token del bot e il tuo ID Telegram, poi:" -ForegroundColor Cyan
-Write-Host "  Start-ScheduledTask 'Second Brain - servizio'"
+Write-Host "`nEdit $serverJson with the bot token and your Telegram ID, then:" -ForegroundColor Cyan
+Write-Host "  Start-ScheduledTask 'Second Brain - service'"

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Aggiorna l'app sul Mac all'ultima versione su GitHub e la reinstalla in Applicazioni.
+# Update the app on the Mac to the latest version on GitHub and reinstall it in Applications.
 set -e
 cd "$(dirname "$0")/../.."
 git pull

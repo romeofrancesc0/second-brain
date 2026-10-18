@@ -3,3 +3,6 @@ out/
 dist/
 .DS_Store
 *.tsbuildinfo
+.env
+.env.*
+server.json

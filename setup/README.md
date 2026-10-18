@@ -1,66 +1,68 @@
-# Second Brain su due computer
+# Second Brain on two computers (optional)
 
-Il modello gira sul **PC di casa a Palermo** (RTX 5070 12 GB), sempre acceso.
-Il **Mac** usa l'app normalmente, ma chiede le risposte al PC tramite una rete privata (Tailscale).
-Il **vault** è sincronizzato tra i due computer con Syncthing.
-Dal telefono si usa il **bot Telegram**, che gira sul PC.
+This is an optional, advanced setup. If you just want to use the app, download it from the [Releases page](../../../releases/latest) instead.
+
+The idea: run the model on an **always-on home PC with a GPU** (this guide assumes Windows and an RTX card with 12 GB of VRAM), and use the app from a **laptop** that asks the PC for answers over a private network ([Tailscale](https://tailscale.com)). The **vault** is kept in sync between the two machines with [Syncthing](https://syncthing.net). From your phone you can talk to the agent through a **Telegram bot** that runs on the PC.
 
 ```
-Mac ──Tailscale──▶ PC Palermo: Ollama (qwen3.5:9b) · app · servizio agente + bot Telegram
- ▲                    ▲
- └──── Syncthing ─────┘  (vault sincronizzato)
+Laptop ──Tailscale──▶ Home PC: Ollama · app · agent service + Telegram bot
+  ▲                       ▲
+  └──── Syncthing ────────┘  (synced vault)
 ```
 
-## Sul PC (via TeamViewer)
+Throughout this guide the PC is called `homepc`; use any name you like.
 
-1. Scarica questo repo (zip da GitHub o `git clone`) e apri `setup\windows`.
-2. PowerShell **come amministratore**:
+## On the PC (e.g. via remote desktop)
+
+1. Download this repo (zip from GitHub or `git clone`) and open `setup\windows`.
+2. In PowerShell **as administrator**:
    ```powershell
-   Set-ExecutionPolicy -Scope Process Bypass; .\1-prepara-pc.ps1
+   Set-ExecutionPolicy -Scope Process Bypass; .\1-prepare-pc.ps1
    ```
-   Lo script installa Git, Node, Ollama, Tailscale e Syncthing, apre Ollama solo alla rete Tailscale, attiva SSH e disattiva la sospensione.
-3. Accedi a Tailscale con lo stesso account del Mac. In [admin.tailscale.com](https://login.tailscale.com/admin/machines) rinomina il PC in `palermo` e disattiva *Key expiry*.
-4. Riavvia, poi lancia `.\2-modelli.ps1`.
-5. Prepara il vault con Syncthing (sezione sotto). Poi:
+   The script installs Git, Node, Ollama, Tailscale and Syncthing, opens Ollama to the Tailscale network only, enables SSH and disables sleep.
+3. Sign in to Tailscale with the same account as the laptop. In the [Tailscale admin console](https://login.tailscale.com/admin/machines) rename the PC to `homepc` and disable *Key expiry*.
+4. Reboot, then run `.\2-models.ps1`.
+5. Set up the vault with Syncthing (section below). Then:
    ```powershell
-   .\3-app-e-servizio.ps1 -Vault "C:\Users\<te>\SECONDBRAIN"
+   .\3-app-and-service.ps1 -Vault "C:\Users\<you>\SECONDBRAIN"
    ```
-6. Nel BIOS imposta la riaccensione dopo un blackout.
+6. In the BIOS, set the PC to power on again after a power outage.
 
-## Sul Mac
+## On the laptop
 
-1. Installa Tailscale (`brew install --cask tailscale` oppure dall'App Store) e accedi con lo stesso account.
-2. Verifica: `curl http://palermo:11434/api/tags` deve elencare i modelli.
-3. Nell'app: **Agente → impostazioni → Indirizzo** = `http://palermo:11434`, modello `qwen3.5:9b`.
-4. Per liberare RAM puoi togliere i modelli locali: `ollama rm qwen3.5:4b` (e chiudere Ollama sul Mac).
+1. Install Tailscale (macOS: `brew install --cask tailscale` or the App Store) and sign in with the same account.
+2. Check: `curl http://homepc:11434/api/tags` must list the models.
+3. In the app: **Agent → settings → Address** = `http://homepc:11434`, model `qwen3.5:9b`.
+4. To free up RAM you can remove local models (`ollama rm qwen3.5:4b`) and quit Ollama on the laptop.
 
-## Vault sincronizzato (Syncthing)
+## Synced vault (Syncthing)
 
-1. Apri Syncthing su entrambi (sul Mac: `brew install --cask syncthing-app`), interfaccia su `http://127.0.0.1:8384`.
-2. Mac → *Aggiungi dispositivo remoto* → incolla l'ID del PC (Azioni → Mostra ID). Accetta sul PC.
-3. Mac → condividi la cartella `~/Desktop/SECONDBRAIN` con il PC. Sul PC scegli dove salvarla.
-4. In entrambi: *Versionamento file* = *Semplice* (tiene le vecchie versioni).
-5. La cartella `.git` del vault va esclusa dalla sincronizzazione: nel PC aggiungi `.git` agli *Schemi da ignorare*. Così resta un solo repo git, sul Mac.
+1. Open Syncthing on both machines (macOS: `brew install --cask syncthing-app`); the interface is at `http://127.0.0.1:8384`.
+2. Laptop → *Add Remote Device* → paste the PC's ID (Actions → Show ID). Accept on the PC.
+3. Laptop → share your vault folder with the PC. On the PC choose where to save it.
+4. On both: *File Versioning* = *Simple* (keeps old versions).
+5. Exclude the vault's `.git` folder from syncing: on the PC add `.git` to *Ignore Patterns*. That way there is a single git repo, on the laptop.
 
-Evita di modificare **la stessa nota** nello stesso momento sui due computer.
+Avoid editing **the same note** on both computers at the same time.
 
-## Bot Telegram
+## Telegram bot
 
-1. Su Telegram scrivi a **@BotFather** → `/newbot` → copia il token.
-2. Sul PC apri `%APPDATA%\Second Brain\server.json` e incolla il token in `telegramToken`.
-3. Riavvia il servizio: `Start-ScheduledTask 'Second Brain - servizio'`.
-4. Scrivi al bot: ti risponde con il tuo ID. Mettilo in `allowedUsers` (es. `[123456789]`) e riavvia di nuovo il servizio.
+1. On Telegram, message **@BotFather** → `/newbot` → copy the token.
+2. On the PC open `%APPDATA%\Second Brain\server.json` and paste the token into `telegramToken`.
+3. Restart the service: `Start-ScheduledTask 'Second Brain - service'`.
+4. Message your bot: it replies with your Telegram ID. Put it in `allowedUsers` (e.g. `[123456789]`) and restart the service again.
 
-Comandi: domande libere, `/nuova`, `/stop`, `/modello`. Le modifiche al vault arrivano con i pulsanti **Approva / Rifiuta / Annulla**.
+Commands: free-form questions, `/nuova` (new conversation), `/stop`, `/modello` (change model). Vault changes arrive with **Approve / Reject / Undo** buttons.
 
-## Claude Code sul PC dal Mac
+## Claude Code on the PC from the laptop
 
 ```bash
-ssh <utente-windows>@palermo
+ssh <windows-user>@homepc
 ```
-Sul PC: `npm i -g @anthropic-ai/claude-code`, poi `claude` nella cartella del progetto.
 
-## Aggiornare l'app
+On the PC: `npm i -g @anthropic-ai/claude-code`, then `claude` in the project folder.
 
-- PC: `setup\windows\aggiorna.ps1`
-- Mac: `setup/mac/aggiorna.sh`
+## Updating the app
+
+- PC: `setup\windows\update.ps1`
+- Mac: `setup/mac/update.sh`

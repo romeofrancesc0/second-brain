@@ -2,7 +2,16 @@
   "name": "second-brain-viewer",
   "productName": "Second Brain",
   "version": "0.1.0",
-  "description": "Visualizzatore 3D del second brain (vault Obsidian) come rete neurale.",
+  "description": "Explore your Obsidian vault as a 3D neural network, with a local AI agent.",
+  "license": "MIT",
+  "homepage": "https://github.com/romeofrancesc0/second-brain#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/romeofrancesc0/second-brain.git"
+  },
+  "bugs": {
+    "url": "https://github.com/romeofrancesc0/second-brain/issues"
+  },
   "author": "Francesco Romeo",
   "private": true,
   "main": "./out/main/index.js",
@@ -12,9 +21,9 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "dist": "electron-vite build && electron-builder --mac",
-    "app": "electron-vite build && electron-builder --mac --dir",
+    "app": "electron-vite build && electron-builder --mac --dir --arm64",
     "icon": "electron scripts/make-icon.cjs",
-    "app:win": "electron-vite build && electron-builder --win --dir",
+    "app:win": "electron-vite build && electron-builder --win --dir --x64",
     "dist:win": "electron-vite build && electron-builder --win",
     "service": "node out/main/server.js"
   },
@@ -31,12 +40,19 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.png",
       "darkModeSupport": true,
       "identity": "-",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "artifactName": "Second-Brain-mac-${arch}.${ext}"
     },
     "electronLanguages": [
       "it",
@@ -44,14 +60,20 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Second-Brain-win-${arch}.${ext}"
     }
   },
   "devDependencies": {
