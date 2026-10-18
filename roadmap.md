@@ -22,12 +22,12 @@
 
 ## ✅ v0.3 — Viste e impostazioni
 
-- **Tre viste del grafo**, da cambiare con i tasti `1` `2` `3` o dalla barra in basso:
+- **Tre viste del grafo**, tutte in 3D, da scegliere in Impostazioni → Tema (o con i tasti `1` `2` `3`):
   - **Nebulosa**: la rete 3D cinematografica di sempre;
-  - **Minimal**: mappa 2D pulita (punti e linee), tono chiaro, scuro o di sistema;
-  - **Ologramma** (sperimentale): sfere wireframe, flussi tratteggiati, griglia di proiezione, scanline.
+  - **Minimal**: la stessa rete 3D con punti e linee essenziali, tono chiaro, scuro o di sistema;
+  - **Ologramma**: un cervello olografico 3D che contiene la rete; avvicinandosi l'involucro sfuma e compaiono i neuroni.
 - **Finestra Impostazioni** (⌘,) a sezioni: Tema, Grafo, Navigazione, Vault, Agente AI, Scorciatoie; colore d'accento.
-- Interfaccia con tema chiaro/scuro, barra in basso con zoom e vista d'insieme, layout 2D salvato a parte.
+- Interfaccia con tema chiaro/scuro, barra in basso con zoom e vista d'insieme.
 
 ## 🔜 Prossimi passi
 

@@ -29,8 +29,6 @@ export interface VaultGraph {
   links: GraphLink[]
   /** Cached layout positions from a previous session, keyed by node id. */
   positions: Record<string, [number, number, number]>
-  /** Cached flat (2D map) layout, used by the minimal view. */
-  positions2d: Record<string, [number, number, number]>
   scannedAt: number
 }
 
@@ -61,8 +59,6 @@ export interface AppSettings {
   tone: Tone
   /** Accent colour of the interface. */
   accent: string
-  /** Minimal view: lay the network out on a flat 2D map instead of a 3D volume. */
-  flat: boolean
   /** Hologram view: scanlines, flicker and colour fringing (0 = clean). */
   interference: number
   /** Hologram view: projection grid under the network. */
@@ -90,7 +86,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   view: 'nebula',
   tone: 'system',
   accent: '#8796d6',
-  flat: true,
   interference: 0.6,
   grid: true,
   hints: true,
@@ -200,7 +195,7 @@ export interface SecondBrainApi {
   chooseVault(): Promise<string | null>
   loadVault(path: string): Promise<VaultGraph>
   readNote(id: string): Promise<NoteContent>
-  saveLayout(positions: Record<string, [number, number, number]>, flat?: boolean): Promise<void>
+  saveLayout(positions: Record<string, [number, number, number]>): Promise<void>
   getSettings(): Promise<AppSettings>
   saveSettings(settings: AppSettings): Promise<void>
   openInObsidian(id: string): Promise<void>

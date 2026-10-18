@@ -50,7 +50,7 @@ const VIEW_SLIDERS: Record<ViewMode, SliderDef[]> = {
 
 const VIEW_TOGGLES: Record<ViewMode, ToggleDef[]> = {
   nebula: [],
-  minimal: [{ key: 'flat', label: 'Mappa 2D', hint: 'Distende la rete su un piano: si sposta trascinando, senza rotazione' }],
+  minimal: [],
   hologram: [{ key: 'grid', label: 'Base di proiezione', hint: 'La griglia luminosa sotto il cervello' }]
 }
 
@@ -93,7 +93,7 @@ const TONES: { id: Tone; label: string; icon: string }[] = [
 /** Keys that belong to the look of each view, restored by "Ripristina". */
 const VIEW_KEYS: Record<ViewMode, (keyof AppSettings)[]> = {
   nebula: ['atmosphere', 'dof', 'grain', 'bloom'],
-  minimal: ['tone', 'flat'],
+  minimal: ['tone'],
   hologram: ['interference', 'bloom', 'grid']
 }
 
@@ -123,8 +123,8 @@ const SHORTCUTS: { group: string; keys: [string, string][] }[] = [
     keys: [
       ['H', 'Vista d’insieme'],
       ['F', 'Inquadra il neurone selezionato'],
-      ['W A S D', 'Vola (in 2D: sposta)'],
-      ['Q E', 'Scendi / sali (in 2D: zoom)'],
+      ['W A S D', 'Vola'],
+      ['Q E', 'Scendi / sali'],
       ['Shift', 'Più veloce'],
       ['+  −', 'Zoom']
     ]

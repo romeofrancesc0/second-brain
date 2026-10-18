@@ -44,6 +44,7 @@ uniform float uFogFar;
 uniform float uQuad;      // quad half-size, in soma radii
 uniform float uFocus;     // focus distance (camera -> orbit target)
 uniform float uDof;       // depth of field strength
+uniform float uMaxPx;     // neurons bigger than this on screen (camera right next to them) are not drawn
 
 varying vec2 vUv;
 varying vec3 vColor;
@@ -77,7 +78,9 @@ void main() {
   vBlur = blur;
   vFog = smoothstep(uFogNear, uFogFar, depth);
   vDim = aState > 0.5 ? 0.0 : uDim;
-  if (aVisible < 0.01) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  // a neuron filling the screen hides everything and costs a lot of fill: skip it, unless selected
+  bool huge = rpx > uMaxPx && !(aState > 1.5 && aState < 2.5);
+  if (aVisible < 0.01 || huge) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 }
 `
 
@@ -183,15 +186,15 @@ void main() {
   float glow = exp(-(r - 1.0) * 2.6) * (0.07 + 0.05 * vBlur);
   float ring = 0.0;
   if (isMoc) {
-    ring += exp(-pow((r - 1.45) * 20.0, 2.0)) * 0.3;
-    ring += exp(-pow((r - 1.9) * 26.0, 2.0)) * 0.12 * (0.6 + 0.4 * sin(uTime * 0.5 + vSeed * 6.0));
+    ring += exp(-(((r - 1.45) * 20.0) * ((r - 1.45) * 20.0))) * 0.3;
+    ring += exp(-(((r - 1.9) * 26.0) * ((r - 1.9) * 26.0))) * 0.12 * (0.6 + 0.4 * sin(uTime * 0.5 + vSeed * 6.0));
     glow += exp(-(r - 1.0) * 1.8) * 0.06;
   }
   if (vState > 1.5 && vState < 2.5) {
-    ring += exp(-pow((r - 1.35) * 16.0, 2.0)) * 0.85;
+    ring += exp(-(((r - 1.35) * 16.0) * ((r - 1.35) * 16.0))) * 0.85;
     glow += exp(-(r - 1.0) * 2.2) * 0.17;
   } else if (vState > 2.5) {
-    ring += exp(-pow((r - 1.3) * 18.0, 2.0)) * 0.5;
+    ring += exp(-(((r - 1.3) * 18.0) * ((r - 1.3) * 18.0))) * 0.5;
   }
   ring *= smoothstep(3.0, 7.0, vPx) * (1.0 - vBlur);
   float k = (glow + ring) * (1.0 - vFog * 0.85) * (1.0 - vDim * 0.9);
@@ -654,7 +657,9 @@ void main() {
   float fade = (1.0 - vFog * 0.85) * (1.0 - vDim * 0.88);
   // seen from afar the neurons are faint sparks inside the brain; closer in they take over
   float near = mix(0.32, 0.62, uReveal);
-  gl_FragColor = vec4(col * k * inside * flick * scan * fade * near, 1.0);
+  // neurons right in front of the camera dissolve instead of covering the view
+  float lens = vState > 1.5 && vState < 2.5 ? 0.0 : smoothstep(160.0, 400.0, vPx);
+  gl_FragColor = vec4(col * k * inside * flick * scan * fade * near * (1.0 - lens), 1.0);
 }
 `
 
@@ -691,7 +696,7 @@ void main() {
   }
   k *= smoothstep(3.0, 7.0, px);
   k += glow;
-  k *= (1.0 - vFog * 0.85) * (1.0 - vDim * 0.9) * mix(0.45, 0.8, uReveal);
+  k *= (1.0 - vFog * 0.85) * (1.0 - vDim * 0.9) * mix(0.45, 0.8, uReveal) * (1.0 - smoothstep(160.0, 400.0, px));
   if (k < 0.002) discard;
   gl_FragColor = vec4(mix(holoTint(vColor), vec3(1.0), 0.3) * k, 1.0);
 }
@@ -745,7 +750,7 @@ void main() {
   float minor = max(gridLine(p.x), gridLine(p.y)) * 0.22;
   float major = max(gridLine(p.x / 5.0), gridLine(p.y / 5.0)) * 0.5;
   float rings = gridLine(d * 8.0) * 0.35 * (1.0 - smoothstep(0.0, 0.6, d));
-  float sweep = exp(-pow((d - fract(uTime * 0.06) * 1.3) * 14.0, 2.0)) * 0.5;
+  float sweep = exp(-(((d - fract(uTime * 0.06) * 1.3) * 14.0) * ((d - fract(uTime * 0.06) * 1.3) * 14.0))) * 0.5;
   float fade = 1.0 - smoothstep(0.25, 1.0, d);
   vec3 col = vec3(0.3, 0.78, 1.0) * (minor + major + rings + sweep) * fade;
   gl_FragColor = vec4(col * 0.13, 1.0);
@@ -780,9 +785,9 @@ varying float vFold;
 
 void main() {
   vec3 n = normalize(vN);
-  vec3 v = normalize(vView);
-  float ndv = abs(dot(n, v));
-  float fres = pow(1.0 - ndv, 2.4);
+  vec3 v = normalize(vView + vec3(1e-5));
+  float ndv = min(abs(dot(n, v)), 1.0);
+  float fres = pow(clamp(1.0 - ndv, 0.0, 1.0), 2.4);
   float facing = gl_FrontFacing ? 1.0 : 0.4;
   float sulcus = 1.0 - smoothstep(0.0, 0.6, vFold);
   float gyrus = smoothstep(0.5, 1.0, vFold);
@@ -793,9 +798,9 @@ void main() {
   float slice = 1.0 - smoothstep(0.4, 1.4, dl);
   // a soft band of light sweeping upwards every few seconds
   float band = fract(uTime * 0.06) * 2.6 - 1.3;
-  float sweep = exp(-pow((vLocal.y - band) * 7.0, 2.0));
+  float sweep = exp(-(((vLocal.y - band) * 7.0) * ((vLocal.y - band) * 7.0)));
 
-  float k = 0.012 + fres * 0.24 + gyrus * pow(ndv, 3.0) * 0.035 + slice * (0.02 + fres * 0.05) + sweep * (0.03 + gyrus * 0.07);
+  float k = 0.012 + fres * 0.24 + gyrus * pow(min(ndv, 1.0), 3.0) * 0.035 + slice * (0.02 + fres * 0.05) + sweep * (0.03 + gyrus * 0.07);
   // the grooves between the folds stay dark, so the gyri read as soft ridges of light
   k *= 1.0 - sulcus * 0.8;
   k *= 1.0 - uInterf * 0.12 * (0.5 + 0.5 * sin(gl_FragCoord.y * 1.7 - uTime * 9.0));

@@ -24,8 +24,8 @@ let watcher: FSWatcher | null = null
 let agent: ReturnType<typeof registerAgent> | null = null
 
 const configPath = (): string => join(app.getPath('userData'), 'config.json')
-const layoutPath = (vault: string, flat = false): string =>
-  join(app.getPath('userData'), 'layouts', createHash('sha1').update(vault).digest('hex') + (flat ? '-2d' : '') + '.json')
+const layoutPath = (vault: string): string =>
+  join(app.getPath('userData'), 'layouts', createHash('sha1').update(vault).digest('hex') + '.json')
 
 interface Config {
   lastVault?: string
@@ -72,11 +72,8 @@ async function loadGraph(vault: string): Promise<VaultGraph> {
   currentResolver = resolver
   knowledge = new VaultKnowledge(vault, scan)
   agent?.onScan(knowledge)
-  const [positions, positions2d] = await Promise.all([
-    readJson<VaultGraph['positions']>(layoutPath(vault), {}),
-    readJson<VaultGraph['positions']>(layoutPath(vault, true), {})
-  ])
-  return { ...graph, positions, positions2d }
+  const positions = await readJson<VaultGraph['positions']>(layoutPath(vault), {})
+  return { ...graph, positions }
 }
 
 function watchVault(vault: string): void {
@@ -140,8 +137,8 @@ function registerIpc(): void {
     const links = currentResolver ? resolveNoteLinks(currentResolver, id, src) : {}
     return { id, markdown: body, frontmatter, links, mtime: stat.mtimeMs }
   })
-  ipcMain.handle('layout:save', async (_e, positions: VaultGraph['positions'], flat?: boolean) => {
-    if (currentVault) await writeJson(layoutPath(currentVault, !!flat), positions)
+  ipcMain.handle('layout:save', async (_e, positions: VaultGraph['positions']) => {
+    if (currentVault) await writeJson(layoutPath(currentVault), positions)
   })
   ipcMain.handle('window:theme', (_e, theme: 'dark' | 'light') => {
     if (!mainWindow) return

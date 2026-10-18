@@ -22,11 +22,6 @@ export function isLight(s: AppSettings): boolean {
   return s.tone === 'light' || (s.tone === 'system' && prefersLight.matches)
 }
 
-/** Only the minimal view lays the network out on a 2D map. */
-export function isFlat(s: AppSettings): boolean {
-  return s.view === 'minimal' && s.flat
-}
-
 export function onSystemToneChange(cb: () => void): void {
   prefersLight.addEventListener('change', cb)
 }

@@ -110,7 +110,7 @@ function sculpt(geo: THREE.BufferGeometry, surface: (p: THREE.Vector3) => { r: n
 /** Cerebrum, cerebellum and brainstem in one geometry (position, normal, aFold). */
 export function buildBrainGeometry(): THREE.BufferGeometry {
   // cerebrum: a finely subdivided sphere shaped by cerebrumRadius, with folds
-  let cerebrum: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 72)
+  let cerebrum: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 56)
   cerebrum.deleteAttribute('normal')
   cerebrum.deleteAttribute('uv')
   cerebrum = mergeVertices(cerebrum)
@@ -123,7 +123,7 @@ export function buildBrainGeometry(): THREE.BufferGeometry {
   })
 
   // cerebellum: a flattened ellipsoid under the occipital lobe, with fine horizontal folia
-  let cerebellum: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 36)
+  let cerebellum: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 28)
   cerebellum.deleteAttribute('normal')
   cerebellum.deleteAttribute('uv')
   cerebellum = mergeVertices(cerebellum)
@@ -160,7 +160,11 @@ export interface BrainFit {
 /** Fits the brain to a layout: same centre, about the same volume. */
 export function fitBrain(layout: Float32Array, count: number): BrainFit {
   const c = new THREE.Vector3()
-  for (let i = 0; i < count; i++) c.add(new THREE.Vector3(layout[i * 3], layout[i * 3 + 1], layout[i * 3 + 2]))
+  for (let i = 0; i < count; i++) {
+    c.x += layout[i * 3]
+    c.y += layout[i * 3 + 1]
+    c.z += layout[i * 3 + 2]
+  }
   if (count) c.divideScalar(count)
   const v = new THREE.Vector3()
   for (let i = 0; i < count; i++) {

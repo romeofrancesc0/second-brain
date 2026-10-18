@@ -12,8 +12,6 @@ export interface LayoutStart {
   anchors: Float32Array
   degree: Uint16Array
   alpha: number
-  /** Lay the network out on the z = 0 plane (2D map). */
-  flat: boolean
 }
 export type LayoutIn = LayoutStart | { type: 'stop' }
 export type LayoutOut =
@@ -36,8 +34,6 @@ let sim: Simulation<N> | null = null
 let nodes: N[] = []
 let generation = 0
 
-let flat = false
-
 function snapshot(): Float32Array {
   const out = new Float32Array(nodes.length * 3)
   for (let i = 0; i < nodes.length; i++) {
@@ -48,15 +44,9 @@ function snapshot(): Float32Array {
   return out
 }
 
-/** On a flat map the last bit of depth left by the morph is snapped away. */
-function settle(): void {
-  if (flat) for (const n of nodes) n.z = 0
-}
-
 function start(msg: LayoutStart): void {
   sim?.stop()
   const gen = ++generation
-  flat = msg.flat
   nodes = []
   for (let i = 0; i < msg.count; i++) {
     const ax = msg.anchors[i * 3]
@@ -74,7 +64,7 @@ function start(msg: LayoutStart): void {
       const s = Math.sqrt(1 - u * u)
       x = ax * 0.08 + r * s * Math.cos(t)
       y = ay * 0.08 + r * s * Math.sin(t)
-      z = flat ? 0 : az * 0.08 + r * u
+      z = az * 0.08 + r * u
     }
     nodes.push({ x, y, z, ax, ay, az, deg: msg.degree[i] })
   }
@@ -104,8 +94,7 @@ function start(msg: LayoutStart): void {
     )
     .force('ax', forceX<N>((n) => n.ax).strength(anchorStrength))
     .force('ay', forceY<N>((n) => n.ay).strength(anchorStrength))
-    // flat map: depth is pulled to zero, so an existing 3D layout visibly collapses onto the plane
-    .force('az', forceZ<N>((n) => n.az).strength(flat ? 0.35 : anchorStrength))
+    .force('az', forceZ<N>((n) => n.az).strength(anchorStrength))
     .stop()
 
   const initialAlpha = msg.alpha
@@ -115,13 +104,11 @@ function start(msg: LayoutStart): void {
     do sim.tick()
     while (performance.now() - t0 < 12 && sim.alpha() > ALPHA_MIN)
     const alpha = sim.alpha()
+    const positions = snapshot()
     if (alpha <= ALPHA_MIN) {
-      settle()
-      const positions = snapshot()
       postMessage({ type: 'done', positions } satisfies LayoutOut, [positions.buffer])
       return
     }
-    const positions = snapshot()
     const progress = 1 - Math.log(alpha / ALPHA_MIN) / Math.log(initialAlpha / ALPHA_MIN)
     postMessage({ type: 'tick', positions, progress } satisfies LayoutOut, [positions.buffer])
     setTimeout(loop, 0)

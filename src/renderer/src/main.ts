@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS, type AppSettings, type GraphNode, type VaultGraph, ty
 import { Brain } from './graph/Brain'
 import { AgentPanel } from './ui/agent'
 import { buildPalette } from './graph/palette'
-import { VIEWS, isFlat, isLight, onSystemToneChange } from './graph/views'
+import { VIEWS, isLight, onSystemToneChange } from './graph/views'
 import { Dock } from './ui/dock'
 import { icons } from './ui/icons'
 import { Legend } from './ui/legend'
@@ -93,8 +93,8 @@ async function boot(): Promise<void> {
     $('#progress span').textContent = `Formazione della rete neurale… ${Math.round(progress * 100)}%`
     if (done) {
       const layout = brain.getLayout()
-      if (graph) graph[brain.layoutFlat ? 'positions2d' : 'positions'] = layout
-      void window.api.saveLayout(layout, brain.layoutFlat)
+      if (graph) graph.positions = layout
+      void window.api.saveLayout(layout)
     }
   }
 
@@ -134,12 +134,11 @@ async function boot(): Promise<void> {
   function commit(s: AppSettings, structural = false): void {
     const prev = settings
     settings = s
-    const reshape = isFlat(prev) !== isFlat(s)
     const restyle = prev.view !== s.view || isLight(prev) !== isLight(s)
     const apply = (): void => {
       applyTheme()
       brain.applySettings(s)
-      if ((structural || reshape) && graph) rebuild(false)
+      if (structural && graph) rebuild(false)
       paintHint()
     }
     // a short fade hides the swap of shaders and colours
@@ -266,26 +265,13 @@ async function boot(): Promise<void> {
     shownIds = ids
     const index = new Map(nodes.map((n, i) => [n.id, i]))
 
-    // keep the current layout when rebuilding, fall back to the cached one; switching between
-    // the 3D volume and the flat map uses that shape's cache, or morphs the current layout
-    const flat = isFlat(settings)
+    // keep the current layout when rebuilding, fall back to the cached one
     const known = new Map<string, [number, number, number]>()
-    const cache = flat ? graph.positions2d : graph.positions
-    let alpha: number | undefined
-    if (brain.nodes.length && brain.layoutFlat === flat) {
-      brain.nodes.forEach((n, i) => known.set(n.id, [brain.layoutPositions[i * 3], brain.layoutPositions[i * 3 + 1], brain.layoutPositions[i * 3 + 2]]))
-    } else if (nodes.filter((n) => cache[n.id]).length > nodes.length * 0.8 || !brain.nodes.length) {
-      for (const [id, p] of Object.entries(cache)) known.set(id, p)
+    if (brain.nodes.length) {
+      const p = brain.layoutPositions
+      brain.nodes.forEach((n, i) => known.set(n.id, [p[i * 3], p[i * 3 + 1], p[i * 3 + 2]]))
     } else {
-      const spread = flat ? 0 : 120
-      brain.nodes.forEach((n, i) =>
-        known.set(n.id, [
-          brain.layoutPositions[i * 3],
-          brain.layoutPositions[i * 3 + 1],
-          brain.layoutPositions[i * 3 + 2] + (Math.random() - 0.5) * spread
-        ])
-      )
-      alpha = 0.6
+      for (const [id, p] of Object.entries(graph.positions)) known.set(id, p)
     }
 
     brain.setGraph(
@@ -294,9 +280,7 @@ async function boot(): Promise<void> {
         links: links.map((l) => [index.get(l.source)!, index.get(l.target)!]),
         colors: palette,
         known,
-        groups: groupOrder,
-        flat,
-        alpha
+        groups: groupOrder
       },
       intro
     )
@@ -361,11 +345,10 @@ function applyTheme(): void {
 function paintHint(): void {
   const el = $('#hint')
   el.classList.toggle('off', !settings.hints)
-  const flat = isFlat(settings)
   const items: [string, string][] = [
-    ['trascina', flat ? 'sposta' : 'ruota'],
+    ['trascina', 'ruota'],
     ['scroll', 'zoom'],
-    ['W A S D', flat ? 'muovi' : 'vola'],
+    ['W A S D', 'vola'],
     ['click', 'apri neurone'],
     [`${document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl'} ,`, 'impostazioni'],
     ['?', 'scorciatoie']
