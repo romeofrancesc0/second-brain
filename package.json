@@ -35,7 +35,13 @@
       "output": "dist"
     },
     "files": [
-      "out/**/*"
+      "out/**/*",
+      "!node_modules/node-llama-cpp/llama/**/*",
+      "node_modules/node-llama-cpp/llama/*.json",
+      "!node_modules/node-llama-cpp/bins/**/*",
+      "!node_modules/@node-llama-cpp/*/bins/**/*",
+      "node_modules/@node-llama-cpp/${os}-${arch}*/bins/**/*",
+      "!node_modules/@node-llama-cpp/*cuda*/**/*"
     ],
     "mac": {
       "category": "public.app-category.productivity",
@@ -74,7 +80,10 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "Second-Brain-win-${arch}.${ext}"
-    }
+    },
+    "asarUnpack": [
+      "node_modules/@node-llama-cpp/*/bins/**/*"
+    ]
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -93,7 +102,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "node-llama-cpp": "3.22.2",
     "yaml": "^2.9.1",
     "zod": "^4.6.7"
+  },
+  "allowScripts": {
+    "node-llama-cpp": false
   }
 }

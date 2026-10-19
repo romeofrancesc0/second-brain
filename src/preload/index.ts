@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import type { AgentEvent, IndexStatus, SecondBrainApi, VaultGraph } from '@shared/types'
+import type { AgentEvent, IndexStatus, ModelDownloadProgress, SecondBrainApi, VaultGraph } from '@shared/types'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, payload: T): void => cb(payload)
@@ -34,7 +34,11 @@ const api: SecondBrainApi = {
   indexStatus: () => ipcRenderer.invoke('index:status'),
   indexBuild: () => ipcRenderer.invoke('index:build'),
   onIndexStatus: (cb) => subscribe<IndexStatus>('index:status', cb),
-  mcpInfo: () => ipcRenderer.invoke('mcp:info')
+  mcpInfo: () => ipcRenderer.invoke('mcp:info'),
+  builtinModels: () => ipcRenderer.invoke('builtin:models'),
+  builtinDownload: (id) => ipcRenderer.invoke('builtin:download', id),
+  builtinCancel: () => ipcRenderer.invoke('builtin:cancel'),
+  onBuiltinProgress: (cb) => subscribe<ModelDownloadProgress>('builtin:progress', cb)
 }
 
 contextBridge.exposeInMainWorld('api', api)

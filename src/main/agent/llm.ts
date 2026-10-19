@@ -1,4 +1,6 @@
 import type { AiSettings } from '@shared/types'
+import { secondBrainDataDir } from '../platform'
+import { BuiltinClient } from './builtin'
 
 export interface ToolCall {
   id: string
@@ -58,7 +60,9 @@ export class ModelError extends Error {
 /** How long Ollama keeps a model in (GPU) memory after the last request. */
 const OLLAMA_KEEP_ALIVE = '2m'
 
-export function createClient(s: Pick<AiSettings, 'provider' | 'baseUrl'>): ChatClient {
+/** `dataDir` is where the built-in provider keeps its downloaded models. */
+export function createClient(s: Pick<AiSettings, 'provider' | 'baseUrl'>, dataDir = secondBrainDataDir()): ChatClient {
+  if (s.provider === 'builtin') return new BuiltinClient(dataDir)
   const base = s.baseUrl.replace(/\/+$/, '')
   return s.provider === 'ollama' ? new OllamaClient(base) : new OpenAICompatClient(base)
 }

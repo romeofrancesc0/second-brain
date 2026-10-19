@@ -53,7 +53,7 @@ export class AgentSession {
     this.abort = new AbortController()
     const signal = this.abort.signal
     const run = ++this.runs
-    const client = createClient(s)
+    const client = createClient(s, base.dataDir)
     const readOnly = !!this.host.readOnly
     if (!this.history.length) {
       this.history.push({ role: 'system', content: buildSystemPrompt(base.knowledge(), await this.host.rules(), readOnly) })
@@ -62,6 +62,7 @@ export class AgentSession {
 
     let useTools = true
     let think = s.think
+    const seen = new Set<string>()
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
         let res: ChatResult
@@ -124,6 +125,18 @@ export class AgentSession {
         if (!calls.length) break
         for (const [i, call] of calls.entries()) {
           if (signal.aborted) break
+          // small models can get stuck repeating the very same call: answer it without running it again
+          const key = `${call.name}\u0000${JSON.stringify(call.args)}`
+          if (seen.has(key)) {
+            this.history.push({
+              role: 'tool',
+              content: 'Hai già fatto questa stessa chiamata e il risultato non cambia. Usa i risultati che hai, prova un altro strumento o rispondi.',
+              toolCallId: call.id,
+              toolName: call.name
+            })
+            continue
+          }
+          seen.add(key)
           const result = await this.runTool(call, `${run}-${step}-${i}`, base, s, signal)
           this.history.push({ role: 'tool', content: result.content, toolCallId: call.id, toolName: call.name })
         }

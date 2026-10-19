@@ -1,4 +1,15 @@
-import { DEFAULT_AI, type AgentEvent, type AgentPhase, type AgentToolCall, type AiSettings, type AiStatus, type DiffLine, type IndexStatus } from '@shared/types'
+import {
+  DEFAULT_AI,
+  type AgentEvent,
+  type AgentPhase,
+  type AgentToolCall,
+  type AiSettings,
+  type AiStatus,
+  type BuiltinModelInfo,
+  type DiffLine,
+  type IndexStatus,
+  type ModelDownloadProgress
+} from '@shared/types'
 import { icons } from './icons'
 import { decorateCallouts, renderMarkdown } from './markdown'
 
@@ -32,6 +43,7 @@ const GLYPHS = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '�
 const SLOW_START_MS = 12000
 
 const PROVIDERS: { id: AiSettings['provider']; label: string; url: string }[] = [
+  { id: 'builtin', label: 'Integrato (nessuna installazione)', url: '' },
   { id: 'ollama', label: 'Ollama', url: 'http://localhost:11434' },
   { id: 'openai', label: 'LM Studio / server compatibile OpenAI', url: 'http://localhost:1234/v1' }
 ]
@@ -40,6 +52,8 @@ const PROVIDERS: { id: AiSettings['provider']; label: string; url: string }[] = 
 export class AgentPanel {
   private settings: AiSettings = { ...DEFAULT_AI }
   private status: AiStatus | null = null
+  private builtin: BuiltinModelInfo | null = null
+  private download: ModelDownloadProgress | null = null
   private index: IndexStatus | null = null
   private running = false
   private segments: Segment[] = []
@@ -106,6 +120,7 @@ export class AgentPanel {
     this.input.addEventListener('input', () => this.autosize())
     root.addEventListener('click', (e) => this.onClick(e))
     window.api.onAgentEvent((ev) => this.handle(ev))
+    window.api.onBuiltinProgress((p) => this.onDownload(p))
     window.api.onIndexStatus((s) => {
       this.index = s
       this.paintIndex()
@@ -142,7 +157,7 @@ export class AgentPanel {
   /* ---------------------------------------------------------------- status */
 
   private async refreshStatus(): Promise<void> {
-    this.status = await window.api.aiStatus(this.settings)
+    ;[this.status, this.builtin] = await Promise.all([window.api.aiStatus(this.settings), window.api.builtinModels()])
     // first run with Ollama: pick a model automatically
     if (this.status.ok && !this.settings.model && this.status.models.length) {
       this.settings.model = this.status.models.find((m) => !/embed/i.test(m)) ?? this.status.models[0]
@@ -168,16 +183,91 @@ export class AgentPanel {
           <p>Fai una domanda sul tuo vault. L'agente cerca e legge le note, ragiona sui collegamenti e — se glielo chiedi — crea o modifica neuroni, chiedendoti conferma per ogni modifica.</p>
           <div class="suggestions">${SUGGESTIONS.map((s) => `<button class="suggestion">${esc(s)}</button>`).join('')}</div>
         </div>`
-      : `<div class="agent-empty">
-          <h4>Collega un modello locale</h4>
-          <p>${this.status?.error ? esc(this.status.error) : 'Nessun server del modello trovato.'}</p>
+      : this.setupHtml()
+  }
+
+  /** First run: no model reachable. Offer the built-in model, keep Ollama / LM Studio as the advanced path. */
+  private setupHtml(): string {
+    const info = this.builtin
+    const rec = info?.models.find((m) => m.id === info.recommended)
+    const why = rec
+      ? `${esc(rec.label)}, scelto in base alla memoria di questo computer (${info!.ramGb} GB). Si scarica una volta sola e poi funziona senza internet: le note non escono dal computer.`
+      : ''
+    return `<div class="agent-empty">
+        <h4>Attiva l'agente</h4>
+        <p>L'agente usa un modello di intelligenza artificiale che gira sul tuo computer. ${why}</p>
+        <div class="dl-slot">${this.setupAction()}</div>
+        <details class="adv">
+          <summary>Hai già Ollama o LM Studio?</summary>
+          ${this.settings.provider !== 'builtin' && this.status?.error ? `<p class="muted">${esc(this.status.error)}</p>` : ''}
           <ol>
             <li>Avvia <b>Ollama</b> (oppure il server di LM Studio).</li>
             <li>Assicurati di avere un modello che supporta gli strumenti (es. Qwen 3, Llama 3.1, Mistral).</li>
             <li>Sceglilo nelle impostazioni dell'agente.</li>
           </ol>
           <div class="row"><button class="btn" data-action="retry">${icons.refresh}Riprova</button><button class="btn ghost" data-action="settings">${icons.sliders}Impostazioni</button></div>
+        </details>
+      </div>`
+  }
+
+  /** The download button, or its progress bar while it runs. */
+  private setupAction(): string {
+    const info = this.builtin
+    const rec = info?.models.find((m) => m.id === info.recommended)
+    const installed = info?.models.find((m) => m.installed)
+    const d = this.download
+    const error = d?.phase === 'error' ? `<p class="error">${esc(d.error ?? 'Download non riuscito')}</p>` : ''
+    if (d && (d.phase === 'downloading' || d.phase === 'verifying')) {
+      const pct = d.total ? (d.received / d.total) * 100 : 0
+      const eta = d.speed && d.phase === 'downloading' ? ` · ${duration((d.total - d.received) / d.speed)}` : ''
+      const meta =
+        d.phase === 'verifying'
+          ? 'Verifico il file…'
+          : `${gb(d.received)} di ${gb(d.total)} GB${d.speed ? ` · ${(d.speed / 1e6).toFixed(1)} MB/s` : ''}${eta}`
+      return `<div class="dl">
+          <div class="dl-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+          <div class="dl-meta"><span>${meta}</span>${d.phase === 'downloading' ? `<button class="link-btn" data-dl-cancel>Pausa</button>` : ''}</div>
         </div>`
+    }
+    if (installed && this.settings.provider !== 'builtin')
+      return `<button class="btn primary" data-use-builtin="${installed.id}">${icons.check}Usa il modello integrato (${esc(installed.label)})</button>${error}`
+    if (!rec) return error
+    const partial = rec.partial || (d?.id === rec.id ? d.received : 0)
+    return `<button class="btn primary" data-dl="${rec.id}">${icons.download}${
+      partial ? `Riprendi il download (${gb(partial)} di ${gb(rec.size)} GB)` : `Scarica il modello consigliato (${gb(rec.size)} GB)`
+    }</button>${error}`
+  }
+
+  private onDownload(p: ModelDownloadProgress): void {
+    this.download = p
+    if (p.phase === 'done') {
+      this.download = null
+      void this.useBuiltin(p.id)
+      return
+    }
+    // repaint only the download slot, so the rest of the card keeps its state
+    const slot = this.messagesEl.querySelector('.dl-slot')
+    if (slot) slot.innerHTML = this.setupAction()
+    if (!this.settingsEl.classList.contains('hidden')) this.paintBuiltinList()
+  }
+
+  private async useBuiltin(id: string): Promise<void> {
+    this.settings = { ...this.settings, provider: 'builtin', model: id, embedModel: '' }
+    await window.api.aiSaveSettings(this.settings)
+    await this.refreshStatus()
+    if (!this.settingsEl.classList.contains('hidden')) this.paintSettings()
+  }
+
+  private async startDownload(id: string): Promise<void> {
+    const m = this.builtin?.models.find((x) => x.id === id)
+    this.onDownload({ id, received: m?.partial ?? 0, total: m?.size ?? 0, phase: 'downloading' })
+    const res = await window.api.builtinDownload(id)
+    if (!res.ok) {
+      this.builtin = await window.api.builtinModels()
+      const slot = this.messagesEl.querySelector('.dl-slot')
+      if (slot) slot.innerHTML = this.setupAction()
+      this.paintBuiltinList()
+    }
   }
 
   /* ------------------------------------------------------------------ chat */
@@ -413,6 +503,11 @@ export class AgentPanel {
     if (action === 'close') return this.toggle(false)
     if (action === 'settings') return this.showSettings(this.settingsEl.classList.contains('hidden'))
     if (action === 'retry') return void this.refreshStatus()
+    const dl = t.closest<HTMLElement>('[data-dl]')?.dataset.dl
+    if (dl) return void this.startDownload(dl)
+    if (t.closest('[data-dl-cancel]')) return void window.api.builtinCancel()
+    const use = t.closest<HTMLElement>('[data-use-builtin]')?.dataset.useBuiltin
+    if (use) return void this.useBuiltin(use)
     if (action === 'new') {
       void window.api.agentReset()
       this.stopLive()
@@ -494,13 +589,18 @@ export class AgentPanel {
         <h4>Modello</h4>
         <label class="field"><span>Server</span>
           <select data-k="provider">${PROVIDERS.map((p) => option(p.id, p.label, s.provider)).join('')}</select></label>
-        <label class="field"><span>Indirizzo</span><input data-k="baseUrl" value="${esc(s.baseUrl)}" spellcheck="false" /></label>
+        ${s.provider === 'builtin' ? '' : `<label class="field"><span>Indirizzo</span><input data-k="baseUrl" value="${esc(s.baseUrl)}" spellcheck="false" /></label>`}
         <div class="status-line ${this.status?.ok ? 'ok' : 'off'}">${
-          this.status?.ok ? `Collegato · ${models.length} modelli disponibili` : esc(this.status?.error ?? 'Non collegato')
+          this.status?.ok
+            ? s.provider === 'builtin'
+              ? `Pronto · ${models.length} ${models.length === 1 ? 'modello scaricato' : 'modelli scaricati'}`
+              : `Collegato · ${models.length} modelli disponibili`
+            : esc(this.status?.error ?? 'Non collegato')
         }<button class="link-btn" data-action="retry">Aggiorna</button></div>
+        ${s.provider === 'builtin' ? '<div class="builtin-list"></div>' : ''}
         <label class="field"><span>Modello di chat</span>
           <select data-k="model">${s.model && !chatModels.includes(s.model) ? option(s.model, s.model + ' (non trovato)', s.model) : ''}${
-            chatModels.length ? chatModels.map((m) => option(m, m, s.model)).join('') : option('', '—', s.model)
+            chatModels.length ? chatModels.map((m) => option(m, this.modelLabel(m), s.model)).join('') : option('', '—', s.model)
           }</select></label>
         <label class="field"><span>Contesto (token)</span><input data-k="numCtx" type="number" min="2048" step="1024" value="${s.numCtx}" /></label>
         <label class="slider"><span>Temperatura<output>${s.temperature.toFixed(2)}</output></span>
@@ -511,11 +611,15 @@ export class AgentPanel {
         <p class="hint-text">Ogni modifica viene salvata con un backup e si può annullare dalla chat.</p>
 
         <h4>Ricerca semantica</h4>
-        <label class="field"><span>Modello di embedding</span>
+        ${
+          s.provider === 'builtin'
+            ? `<p class="hint-text">Con il modello integrato la ricerca usa le parole chiave. Per cercare anche per significato usa Ollama con un modello di embedding.</p>`
+            : `<label class="field"><span>Modello di embedding</span>
           <select data-k="embedModel">${option('', 'Nessuno (solo parole chiave)', s.embedModel)}${
             s.embedModel && !embedModels.includes(s.embedModel) ? option(s.embedModel, s.embedModel, s.embedModel) : ''
           }${embedModels.map((m) => option(m, m, s.embedModel)).join('')}</select></label>
-        <div class="index-status"></div>
+        <div class="index-status"></div>`
+        }
 
         <h4>Usa il vault da altre app (MCP)</h4>
         <p class="hint-text">LM Studio, Claude Desktop e altri client MCP possono usare gli stessi strumenti dell'agente. Incolla questa configurazione nel loro file MCP:</p>
@@ -526,6 +630,30 @@ export class AgentPanel {
       el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', () => this.onSetting(el))
     })
     this.paintIndex()
+    this.paintBuiltinList()
+  }
+
+  private modelLabel(id: string): string {
+    return this.settings.provider === 'builtin' ? (this.builtin?.models.find((m) => m.id === id)?.label ?? id) : id
+  }
+
+  /** Built-in provider: the catalog, with download buttons for the models not on disk yet. */
+  private paintBuiltinList(): void {
+    const el = this.settingsEl.querySelector('.builtin-list')
+    const info = this.builtin
+    if (!el || !info) return
+    const d = this.download
+    el.innerHTML = info.models
+      .map((m) => {
+        const busy = d && d.id === m.id && (d.phase === 'downloading' || d.phase === 'verifying')
+        const right = m.installed
+          ? `<span class="muted">scaricato</span>`
+          : busy
+            ? `<span class="muted">${d.phase === 'verifying' ? 'verifico…' : `${Math.floor((d.received / (d.total || 1)) * 100)}%`}</span><button class="link-btn" data-dl-cancel>Pausa</button>`
+            : `<button class="link-btn" data-dl="${m.id}">${m.partial ? 'Riprendi' : 'Scarica'} · ${gb(m.size)} GB</button>`
+        return `<div class="builtin-row"><span>${esc(m.label)}${m.id === info.recommended ? ' <em>consigliato</em>' : ''}</span>${right}</div>`
+      })
+      .join('')
   }
 
   private onSetting(el: HTMLInputElement | HTMLSelectElement): void {
@@ -537,8 +665,9 @@ export class AgentPanel {
     if (k === 'temperature') el.parentElement!.querySelector('output')!.textContent = Number(el.value).toFixed(2)
     if (k === 'provider') {
       const def = PROVIDERS.find((p) => p.id === el.value)!
-      if (PROVIDERS.some((p) => p.url === this.settings.baseUrl)) this.settings.baseUrl = def.url
+      if (!this.settings.baseUrl || PROVIDERS.some((p) => p.url === this.settings.baseUrl)) this.settings.baseUrl = def.url
       this.settings.model = ''
+      if (el.value === 'builtin') this.settings.embedModel = ''
     }
     clearTimeout(this.saveTimer)
     this.saveTimer = window.setTimeout(async () => {
@@ -627,6 +756,15 @@ function lastSentence(text: string): string {
 /** Avoids touching the DOM (and restarting CSS animations) when nothing changed. */
 function setText(el: Element, text: string): void {
   if (el.textContent !== text) el.textContent = text
+}
+
+const gb = (bytes: number): string => (bytes / 1e9).toFixed(1).replace('.', ',')
+
+function duration(secs: number): string {
+  if (!isFinite(secs) || secs <= 0) return ''
+  if (secs < 60) return `${Math.ceil(secs)} s`
+  const min = Math.round(secs / 60)
+  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`
 }
 
 const esc = (s: string): string =>
