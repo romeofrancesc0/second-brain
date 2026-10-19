@@ -65,6 +65,14 @@ export class AgentSession {
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
         let res: ChatResult
+        // one status per phase change, not per streamed token
+        let phase: 'reasoning' | 'writing' | null = null
+        const enter = (p: 'reasoning' | 'writing'): void => {
+          if (phase === p) return
+          phase = p
+          emit({ type: 'status', phase: p, text: p === 'reasoning' ? 'Sto ragionando' : 'Scrivo la risposta' })
+        }
+        emit({ type: 'status', phase: 'thinking', text: step === 0 ? 'Elaboro la richiesta' : 'Valuto i risultati' })
         try {
           res = await client.chat({
             model: s.model,
@@ -74,8 +82,14 @@ export class AgentSession {
             numCtx: s.numCtx,
             think,
             signal,
-            onText: (delta) => emit({ type: 'text', delta }),
-            onReasoning: (delta) => emit({ type: 'reasoning', delta })
+            onText: (delta) => {
+              enter('writing')
+              emit({ type: 'text', delta })
+            },
+            onReasoning: (delta) => {
+              enter('reasoning')
+              emit({ type: 'reasoning', delta })
+            }
           })
         } catch (err) {
           if (err instanceof ModelError && err.code === 'no-think' && think) {
@@ -147,6 +161,7 @@ export class AgentSession {
     const def = TOOLS.find((t) => t.name === call.name)
     const ui: AgentToolCall = { id: uiId, name: call.name, label: def ? def.label(call.args) : call.name, args: call.args, status: 'running' }
     emit({ type: 'tool', call: { ...ui } })
+    emit({ type: 'status', phase: 'tool', text: def ? def.activity(call.args) : `Uso ${call.name}` })
 
     const fail = (message: string): ToolResult => {
       ui.status = 'error'
@@ -167,6 +182,7 @@ export class AgentSession {
         }
         ui.status = 'awaiting'
         emit({ type: 'tool', call: { ...ui } })
+        emit({ type: 'status', phase: 'awaiting', text: 'Aspetto la tua approvazione' })
         emit({ type: 'activity', ids: [req.id], mode: 'write' })
         const ok = await new Promise<boolean>((resolve) => {
           this.approvals.set(uiId, resolve)
@@ -175,6 +191,7 @@ export class AgentSession {
         this.approvals.delete(uiId)
         ui.status = ok ? 'running' : 'rejected'
         emit({ type: 'tool', call: { ...ui } })
+        if (ok) emit({ type: 'status', phase: 'tool', text: 'Salvo la modifica' })
         return ok
       }
     }

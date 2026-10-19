@@ -163,8 +163,12 @@ export interface AgentToolCall {
   change?: { changeId: string; undone?: boolean }
 }
 
+/** What the agent is doing right now, shown as a live status line while it works. */
+export type AgentPhase = 'thinking' | 'reasoning' | 'writing' | 'tool' | 'awaiting'
+
 export type AgentEvent =
   | { type: 'start' }
+  | { type: 'status'; phase: AgentPhase; text: string }
   | { type: 'text'; delta: string }
   | { type: 'reasoning'; delta: string }
   | { type: 'tool'; call: AgentToolCall }

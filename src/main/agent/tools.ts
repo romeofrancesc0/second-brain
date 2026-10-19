@@ -53,6 +53,8 @@ export interface ToolResult {
 export interface ToolDef extends ToolSpec {
   write?: boolean
   label(args: Record<string, unknown>): string
+  /** What the agent is doing while the tool runs, e.g. "Cerco «trasformata z» in Segnali". */
+  activity(args: Record<string, unknown>): string
   run(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult>
 }
 
@@ -62,6 +64,8 @@ const PROTECTED_FOLDERS = ['fonti'] // raw sources: never modified (vault rule)
 const MAX_NOTE_CHARS = 7000
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim()
+/** " in <course or area>" when the arguments restrict the tool to one region of the vault. */
+const where = (a: Record<string, unknown>): string => (str(a.corso) ? ` in ${str(a.corso)}` : str(a.area) ? ` in ${str(a.area)}` : '')
 const num = (v: unknown, def: number): number => (Number.isFinite(Number(v)) && v !== '' && v != null ? Number(v) : def)
 const strList = (v: unknown): string[] =>
   (Array.isArray(v) ? v : typeof v === 'string' ? v.replace(/^\s*\[|\]\s*$/g, '').split(',') : [])
@@ -237,6 +241,7 @@ export const TOOLS: ToolDef[] = [
       'List the regions of the vault (courses / areas) with the number of notes and the MOC (map of content) note of each. Use it to orient yourself in the vault.',
     parameters: { type: 'object', properties: {} },
     label: () => 'Panoramica dei corsi',
+    activity: () => 'Esploro le regioni del vault',
     async run(_a, ctx) {
       const k = ctx.knowledge()
       const rows = k.courses()
@@ -263,6 +268,7 @@ export const TOOLS: ToolDef[] = [
       required: ['query']
     },
     label: (a) => `Cerca «${str(a.query)}»`,
+    activity: (a) => `Cerco «${str(a.query)}»${where(a)}`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const query = str(a.query)
@@ -283,6 +289,7 @@ export const TOOLS: ToolDef[] = [
     description: 'Read the full content of a note, with its metadata, outgoing links and backlinks.',
     parameters: { type: 'object', properties: { note: noteParam }, required: ['note'] },
     label: (a) => `Legge «${str(a.note)}»`,
+    activity: (a) => `Leggo «${str(a.note)}»`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
@@ -317,6 +324,7 @@ export const TOOLS: ToolDef[] = [
     description: 'List the notes directly connected to a note: the ones it links to and the ones linking to it.',
     parameters: { type: 'object', properties: { note: noteParam }, required: ['note'] },
     label: (a) => `Collegamenti di «${str(a.note)}»`,
+    activity: (a) => `Seguo i collegamenti di «${str(a.note)}»`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
@@ -344,6 +352,7 @@ export const TOOLS: ToolDef[] = [
       }
     },
     label: (a) => `Elenca le note${str(a.corso) ? ` di ${str(a.corso)}` : str(a.tag) ? ` con #${str(a.tag)}` : ''}`,
+    activity: (a) => `Sfoglio le note${str(a.tag) ? ` con #${str(a.tag)}` : ''}${where(a)}`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const corso = normalize(str(a.corso))
@@ -371,6 +380,7 @@ export const TOOLS: ToolDef[] = [
     description: 'Find the shortest chain of links that connects two notes, to explain how two concepts are related.',
     parameters: { type: 'object', properties: { from: noteParam, to: noteParam }, required: ['from', 'to'] },
     label: (a) => `Percorso «${str(a.from)}» → «${str(a.to)}»`,
+    activity: (a) => `Cerco un percorso da «${str(a.from)}» a «${str(a.to)}»`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const from = noteOrError(k, a.from)
@@ -388,6 +398,7 @@ export const TOOLS: ToolDef[] = [
       'Find notes whose content is related to a note but that are NOT linked to it yet: candidates for new connections. Use read_note on the candidates to verify before proposing or creating links.',
     parameters: { type: 'object', properties: { note: noteParam, limit: { type: 'integer', description: 'Max candidates (default 8)' } }, required: ['note'] },
     label: (a) => `Collegamenti mancanti per «${str(a.note)}»`,
+    activity: (a) => `Cerco note affini a «${str(a.note)}»`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
@@ -424,6 +435,7 @@ export const TOOLS: ToolDef[] = [
       required: ['title', 'content']
     },
     label: (a) => `Crea la nota «${str(a.title)}»`,
+    activity: (a) => `Creo «${str(a.title)}»${str(a.folder) ? ` in ${str(a.folder)}` : where(a)}`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const title = cleanTitle(str(a.title))
@@ -469,6 +481,7 @@ export const TOOLS: ToolDef[] = [
       required: ['note']
     },
     label: (a) => `Modifica «${str(a.note)}»`,
+    activity: (a) => `Modifico «${str(a.note)}»`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
@@ -489,6 +502,7 @@ export const TOOLS: ToolDef[] = [
     description: 'Append a paragraph (Markdown) at the end of an existing note, keeping the rest unchanged.',
     parameters: { type: 'object', properties: { note: noteParam, text: { type: 'string' } }, required: ['note', 'text'] },
     label: (a) => `Aggiunge testo a «${str(a.note)}»`,
+    activity: (a) => `Aggiungo testo a «${str(a.note)}»`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
@@ -511,6 +525,7 @@ export const TOOLS: ToolDef[] = [
       required: ['from', 'to']
     },
     label: (a) => `Collega «${str(a.from)}» → «${str(a.to)}»`,
+    activity: (a) => `Collego «${str(a.from)}» a «${str(a.to)}»`,
     async run(a, ctx) {
       const k = ctx.knowledge()
       const from = noteOrError(k, a.from)

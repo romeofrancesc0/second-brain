@@ -1,4 +1,4 @@
-import { DEFAULT_AI, type AgentEvent, type AgentToolCall, type AiSettings, type AiStatus, type DiffLine, type IndexStatus } from '@shared/types'
+import { DEFAULT_AI, type AgentEvent, type AgentPhase, type AgentToolCall, type AiSettings, type AiStatus, type DiffLine, type IndexStatus } from '@shared/types'
 import { icons } from './icons'
 import { decorateCallouts, renderMarkdown } from './markdown'
 
@@ -26,6 +26,11 @@ const SUGGESTIONS = [
   'Quali note parlano di regione di convergenza?'
 ]
 
+/** Frames of the status glyph, cycled while the agent works (as in Claude Code). */
+const GLYPHS = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢']
+/** After this long without a single token, the model is most likely still being loaded into memory. */
+const SLOW_START_MS = 12000
+
 const PROVIDERS: { id: AiSettings['provider']; label: string; url: string }[] = [
   { id: 'ollama', label: 'Ollama', url: 'http://localhost:11434' },
   { id: 'openai', label: 'LM Studio / server compatibile OpenAI', url: 'http://localhost:1234/v1' }
@@ -41,6 +46,17 @@ export class AgentPanel {
   private message: HTMLElement | null = null
   private tools = new Map<string, { call: AgentToolCall; el: HTMLElement }>()
   private renderQueued = new Set<Segment>()
+  private live: {
+    el: HTMLElement
+    timer: number
+    started: number
+    phase: AgentPhase
+    text: string
+    tokens: number
+    frame: number
+    /** Index of the first segment produced in the current phase. */
+    since: number
+  } | null = null
   private saveTimer: number | undefined
   private messagesEl: HTMLElement
   private input: HTMLTextAreaElement
@@ -176,9 +192,9 @@ export class AgentPanel {
     this.messagesEl.appendChild(user)
     this.message = document.createElement('div')
     this.message.className = 'msg assistant'
-    this.message.innerHTML = `<div class="typing"><i></i><i></i><i></i></div>`
     this.messagesEl.appendChild(this.message)
     this.segments = []
+    this.startLive()
     this.input.value = ''
     this.autosize()
     this.setRunning(true)
@@ -195,13 +211,15 @@ export class AgentPanel {
 
   handle(e: AgentEvent): void {
     if (!this.message && e.type !== 'activity') return
-    const msg = this.message!
     switch (e.type) {
       case 'start':
         break
+      case 'status':
+        this.setLive(e.phase, e.text)
+        break
       case 'text':
       case 'reasoning': {
-        msg.querySelector('.typing')?.remove()
+        if (this.live) this.live.tokens++
         let seg = this.segments[this.segments.length - 1]
         if (!seg || seg.kind !== e.type) {
           const el = document.createElement(e.type === 'text' ? 'div' : 'details')
@@ -210,7 +228,7 @@ export class AgentPanel {
             el.className = 'reasoning'
             el.innerHTML = `<summary>Ragionamento</summary><div class="r-text"></div>`
           }
-          msg.appendChild(el)
+          this.append(el)
           seg = { kind: e.type, text: '', el } as Segment
           this.segments.push(seg)
         }
@@ -219,7 +237,6 @@ export class AgentPanel {
         break
       }
       case 'tool':
-        msg.querySelector('.typing')?.remove()
         this.upsertTool(e.call)
         break
       case 'activity':
@@ -229,7 +246,6 @@ export class AgentPanel {
         this.appendOther('notice', e.message)
         break
       case 'error':
-        msg.querySelector('.typing')?.remove()
         this.appendOther('error', e.message)
         this.finish()
         break
@@ -241,7 +257,7 @@ export class AgentPanel {
   }
 
   private finish(): void {
-    this.message?.querySelector('.typing')?.remove()
+    this.stopLive()
     if (this.message && !this.message.childElementCount) this.appendOther('notice', 'Nessuna risposta.')
     for (const seg of this.renderQueued) this.renderSegment(seg)
     this.renderQueued.clear()
@@ -262,8 +278,68 @@ export class AgentPanel {
     const el = document.createElement('div')
     el.className = kind
     el.textContent = text
-    this.message?.appendChild(el)
+    this.append(el)
     this.segments.push({ kind: 'other', el })
+  }
+
+  /** Adds a block to the current answer, keeping the live status line at the bottom. */
+  private append(el: HTMLElement): void {
+    const msg = this.message
+    if (!msg) return
+    msg.insertBefore(el, this.live?.el.parentElement === msg ? this.live.el : null)
+  }
+
+  /* ----------------------------------------------------------- live status */
+
+  private startLive(): void {
+    this.stopLive()
+    const el = document.createElement('div')
+    el.className = 'agent-status'
+    el.innerHTML = `<div class="st-row"><span class="st-glyph"></span><span class="st-text"></span><span class="st-meta"></span></div><div class="st-detail"></div>`
+    this.message!.appendChild(el)
+    const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+    this.live = { el, timer: 0, started: performance.now(), phase: 'thinking', text: 'Elaboro la richiesta', tokens: 0, frame: 0, since: 0 }
+    this.live.timer = window.setInterval(() => {
+      if (this.live && !still) this.live.frame++
+      this.paintLive()
+    }, 120)
+    this.paintLive()
+  }
+
+  private setLive(phase: AgentPhase, text: string): void {
+    if (!this.live) return
+    this.live.phase = phase
+    this.live.text = text
+    this.live.since = this.segments.length
+    this.paintLive()
+  }
+
+  private stopLive(): void {
+    if (!this.live) return
+    clearInterval(this.live.timer)
+    this.live.el.remove()
+    this.live = null
+  }
+
+  private paintLive(): void {
+    const l = this.live
+    if (!l) return
+    const secs = Math.floor((performance.now() - l.started) / 1000)
+    const time = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`
+    const meta = l.tokens ? `${time} · ${l.tokens >= 1000 ? (l.tokens / 1000).toFixed(1) + 'k' : l.tokens} token` : time
+    let detail = ''
+    if (l.phase === 'reasoning') {
+      // the last thing the model is thinking about, one line
+      const seg = this.segments.slice(l.since).find((x) => x.kind === 'reasoning') as { text: string } | undefined
+      detail = lastSentence(seg?.text ?? '')
+    } else if (l.phase === 'thinking' && !l.tokens && performance.now() - l.started > SLOW_START_MS) {
+      detail = 'Il primo messaggio può essere lento: il modello si sta caricando in memoria.'
+    }
+    l.el.dataset.phase = l.phase
+    l.el.querySelector('.st-glyph')!.textContent = l.phase === 'awaiting' ? '✋' : GLYPHS[l.frame % GLYPHS.length]
+    setText(l.el.querySelector('.st-text')!, `${l.text}…`)
+    setText(l.el.querySelector('.st-meta')!, meta)
+    setText(l.el.querySelector('.st-detail')!, detail)
   }
 
   private queueRender(seg: Segment): void {
@@ -292,7 +368,7 @@ export class AgentPanel {
     let entry = this.tools.get(call.id)
     if (!entry) {
       const el = document.createElement('div')
-      this.message!.appendChild(el)
+      this.append(el)
       this.segments.push({ kind: 'tool', el })
       entry = { call, el }
       this.tools.set(call.id, entry)
@@ -339,6 +415,7 @@ export class AgentPanel {
     if (action === 'retry') return void this.refreshStatus()
     if (action === 'new') {
       void window.api.agentReset()
+      this.stopLive()
       this.tools.clear()
       this.message = null
       this.messagesEl.innerHTML = ''
@@ -532,6 +609,24 @@ function diffHtml(diff: DiffLine[]): string {
   return diff
     .map((d) => `<span class="${d.op === '+' ? 'add' : d.op === '-' ? 'del' : 'ctx'}">${d.op === ' ' ? ' ' : d.op} ${esc(d.text)}</span>`)
     .join('')
+}
+
+/** The tail of a streaming text, cut to its last sentence, for a one-line preview. */
+function lastSentence(text: string): string {
+  const lines = text.trim().split('\n').filter((l) => l.trim())
+  const last = (lines[lines.length - 1] ?? '')
+    .replace(/\[\[([^\]|#]+)[^\]]*\]\]/g, '$1')
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/, '')
+    .replace(/[*_`#>]/g, '')
+    .trim()
+  const parts = last.split(/(?<=[.!?:])\s+/).filter(Boolean)
+  const tail = parts[parts.length - 1] ?? ''
+  return tail.length > 140 ? '…' + tail.slice(-140) : tail
+}
+
+/** Avoids touching the DOM (and restarting CSS animations) when nothing changed. */
+function setText(el: Element, text: string): void {
+  if (el.textContent !== text) el.textContent = text
 }
 
 const esc = (s: string): string =>
