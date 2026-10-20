@@ -80,7 +80,11 @@ export interface AppSettings {
   dof: number
   /** Film grain (0 = off). */
   grain: number
+  /** Frame rate of the 3D view while it moves; at rest it drops to about 1 fps. */
+  fps: FrameRate
 }
+
+export type FrameRate = 24 | 30 | 60 | 120
 
 export const DEFAULT_SETTINGS: AppSettings = {
   view: 'nebula',
@@ -100,7 +104,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pulses: false,
   atmosphere: 1,
   dof: 0.7,
-  grain: 0.5
+  grain: 0.5,
+  fps: 60
 }
 
 /** Bumped when the defaults change enough that saved appearance settings should be reset. */
