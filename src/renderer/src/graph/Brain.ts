@@ -47,6 +47,10 @@ const HAZE_BLOBS = 9
 const REST_FPS = 1
 /** How long the loop keeps the full frame rate after the last input or animation. */
 const LINGER_MS = 1800
+/** Auto-rotation starts after this much inactivity and stops (so the loop can rest) after AUTO_ROTATE_END_MS. */
+const AUTO_ROTATE_START_MS = 4000
+const AUTO_ROTATE_END_MS = 30000
+const AUTO_ROTATE_SPEED = 0.25
 /** Damping of the orbit controls per frame at 60 fps (scaled to the actual frame time). */
 const DAMPING = 0.07
 
@@ -187,7 +191,7 @@ export class Brain {
     this.controls.zoomToCursor = true
     this.controls.minDistance = 4
     this.controls.maxDistance = 9000
-    this.controls.autoRotateSpeed = 0.25
+    this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED
     this.controls.addEventListener('start', () => {
       this.flight = null
       this.lastInteraction = performance.now()
@@ -1227,9 +1231,12 @@ export class Brain {
       }
     }
 
-    const idle = performance.now() - this.lastInteraction > 4000
+    const idleMs = performance.now() - this.lastInteraction
+    const idle = idleMs > AUTO_ROTATE_START_MS && idleMs < AUTO_ROTATE_END_MS
     // only while the window has focus: in the background the loop rests
     this.controls.autoRotate = this.settings.autoRotate && this.focused && this.selected < 0 && !this.flight && idle
+    // slows down over the last two seconds instead of stopping dead
+    this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED * THREE.MathUtils.smoothstep(AUTO_ROTATE_END_MS - idleMs, 0, 2000)
     // the same inertia in seconds whatever the frame rate
     this.controls.dampingFactor = 1 - Math.pow(1 - DAMPING, dt * 60)
     const orbiting = this.controls.update(dt)

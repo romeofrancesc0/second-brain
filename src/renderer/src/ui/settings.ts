@@ -71,7 +71,7 @@ const CONTENT_TOGGLES: ToggleDef[] = [
 ]
 
 const MOTION_TOGGLES: ToggleDef[] = [
-  { key: 'autoRotate', label: 'Rotazione automatica', hint: 'Dopo qualche secondo di inattività (solo nelle viste 3D)' },
+  { key: 'autoRotate', label: 'Rotazione automatica', hint: 'Per mezzo minuto, dopo qualche secondo di inattività (solo nelle viste 3D)' },
   { key: 'hints', label: 'Suggerimenti dei comandi', hint: 'La riga di aiuto in basso all’avvio' }
 ]
 
