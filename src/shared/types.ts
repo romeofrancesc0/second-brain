@@ -156,7 +156,7 @@ export interface ModelDownloadProgress {
   id: string
   received: number
   total: number
-  phase: 'downloading' | 'verifying' | 'done' | 'error'
+  phase: 'downloading' | 'verifying' | 'done' | 'paused' | 'error'
   /** Bytes per second. */
   speed?: number
   error?: string

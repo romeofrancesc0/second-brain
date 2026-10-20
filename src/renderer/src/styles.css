@@ -2105,7 +2105,8 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   margin: 4px 0 2px;
 }
 
-.agent-empty .error {
+.agent-empty .error,
+.agent-empty .dl-note {
   margin: 8px 0 0;
 }
 

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
 import { totalmem } from 'node:os'
 import { join } from 'node:path'
 import type { BuiltinModelInfo, ModelDownloadProgress } from '@shared/types'
@@ -55,9 +55,65 @@ export function recommendedModel(): CatalogModel {
   return [...CATALOG].sort((a, b) => b.minRamGb - a.minRamGb).find((m) => gb >= m.minRamGb) ?? CATALOG[0]
 }
 
+/** A file counts as installed only with the exact size: a truncated or replaced one does not. */
 export async function installedModels(dataDir: string): Promise<string[]> {
-  const files = new Set(await readdir(modelsDir(dataDir)).catch(() => [] as string[]))
-  return CATALOG.filter((m) => files.has(m.file)).map((m) => m.id)
+  const dir = modelsDir(dataDir)
+  const sizes = await Promise.all(CATALOG.map((m) => stat(join(dir, m.file)).then((s) => s.size, () => -1)))
+  return CATALOG.filter((m, i) => sizes[i] === m.size).map((m) => m.id)
+}
+
+async function sha256(path: string): Promise<string> {
+  const hash = createHash('sha256')
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer)
+  return hash.digest('hex')
+}
+
+/** Next to each verified model: its checksum, size and mtime, so it is hashed again only if it changes. */
+interface VerifiedMark {
+  sha256: string
+  size: number
+  mtimeMs: number
+}
+
+async function markVerified(path: string, m: CatalogModel): Promise<void> {
+  const s = await stat(path)
+  const mark: VerifiedMark = { sha256: m.sha256, size: s.size, mtimeMs: s.mtimeMs }
+  await writeFile(path + '.ok', JSON.stringify(mark))
+}
+
+/**
+ * Checks a model against its checksum and deletes it when it does not match, so the panel offers
+ * the download again. A damaged file can crash llama.cpp's loader, so this runs before the first load;
+ * it reads the whole file (a few seconds) only when the file is new or changed since the last check.
+ */
+export async function verifyModel(dataDir: string, id: string): Promise<boolean> {
+  const m = catalogModel(id)
+  if (!m) return false
+  const path = join(modelsDir(dataDir), m.file)
+  const [s, mark] = await Promise.all([
+    stat(path).catch(() => null),
+    readFile(path + '.ok', 'utf8').then((t) => JSON.parse(t) as VerifiedMark, () => null)
+  ])
+  if (!s) return false
+  if (mark && mark.sha256 === m.sha256 && mark.size === s.size && mark.mtimeMs === s.mtimeMs) return true
+  const ok = s.size === m.size && (await sha256(path).then((d) => d === m.sha256, () => false))
+  if (ok) await markVerified(path, m)
+  else await Promise.all([rm(path, { force: true }), rm(path + '.ok', { force: true })])
+  return ok
+}
+
+const GB = 1e9
+/** Room left on the disk after the download, for the system and the app's own files. */
+const DISK_MARGIN = 0.5 * GB
+
+async function ensureSpace(dir: string, bytes: number): Promise<void> {
+  const fs = await statfs(dir).catch(() => null)
+  if (!fs) return
+  const free = fs.bavail * fs.bsize
+  if (free < bytes + DISK_MARGIN) {
+    const fmt = (b: number): string => (b / GB).toFixed(1).replace('.', ',')
+    throw new Error(`Spazio su disco insufficiente: servono ${fmt(bytes + DISK_MARGIN)} GB liberi, ce ne sono ${fmt(free)}. Libera spazio e riprova.`)
+  }
 }
 
 export async function modelInfo(dataDir: string): Promise<BuiltinModelInfo> {
@@ -88,6 +144,13 @@ export async function downloadModel(
   await mkdir(dir, { recursive: true })
   const final = join(dir, m.file)
   const part = final + '.part'
+  const existing = await stat(final).then((s) => s.size, () => -1)
+  if (existing === m.size) {
+    onProgress({ id, received: m.size, total: m.size, phase: 'done' })
+    return final
+  }
+  // a final file with the wrong size is damaged: this download replaces it
+  if (existing >= 0) await Promise.all([rm(final, { force: true }), rm(final + '.ok', { force: true })])
 
   // hash what is already on disk, so the checksum covers the whole file
   let hash = createHash('sha256')
@@ -96,6 +159,7 @@ export async function downloadModel(
     await rm(part, { force: true })
     have = 0
   }
+  await ensureSpace(dir, m.size - have)
   if (have) {
     onProgress({ id, received: have, total: m.size, phase: 'verifying' })
     for await (const chunk of createReadStream(part)) hash.update(chunk as Buffer)
@@ -144,6 +208,7 @@ export async function downloadModel(
     throw new Error('Il file scaricato è danneggiato (checksum diverso). Riprova il download.')
   }
   await rename(part, final)
+  await markVerified(final, m)
   onProgress({ id, received: m.size, total: m.size, phase: 'done' })
   return final
 }

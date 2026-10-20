@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import type { ChatHistoryItem, ChatModelFunctionCall, ChatModelFunctions, Llama, LlamaChat, LlamaContext, LlamaModel } from 'node-llama-cpp'
 import { ModelError, type ChatClient, type ChatMessage, type ChatOptions, type ChatResult, type ToolCall } from './llm'
-import { catalogModel, installedModels, modelsDir } from './models'
+import { catalogModel, installedModels, modelsDir, verifyModel } from './models'
 
 /** Free the model (and the GPU memory) after this long without requests, like Ollama's keep_alive. */
 const IDLE_UNLOAD_MS = 2 * 60 * 1000
@@ -49,6 +49,24 @@ async function load(path: string, numCtx: number): Promise<Loaded> {
     loadedKey = ''
   })
   return loaded
+}
+
+const NO_MEMORY =
+  'Memoria insufficiente per il modello integrato. Chiudi le app che stanno usando un altro modello (Ollama, LM Studio…) o molta memoria, poi riprova.'
+
+/** Loads the model after checking the file (a damaged one is removed) and explains a lack of memory. */
+async function loadOrExplain(dataDir: string, id: string, path: string, numCtx: number): Promise<Loaded> {
+  // a missing native binary is not the model's fault: let that error through untouched
+  const { lib } = await runtime()
+  if (!(await verifyModel(dataDir, id)))
+    throw new ModelError('no-model', "Il file del modello era danneggiato e l'ho rimosso: scaricalo di nuovo dalle impostazioni dell'agente.")
+  try {
+    return await load(path, numCtx)
+  } catch (err) {
+    if (err instanceof lib.InsufficientMemoryError || /insufficient memory|out of memory|failed to allocate/i.test(String(err)))
+      throw new ModelError('no-memory', NO_MEMORY)
+    throw err
+  }
 }
 
 async function unload(): Promise<void> {
@@ -146,7 +164,7 @@ export class BuiltinClient implements ChatClient {
     return queued(async () => {
       clearTimeout(idleTimer)
       try {
-        const { chat } = await load(path, o.numCtx)
+        const { chat } = await loadOrExplain(this.dataDir, m.id, path, o.numCtx)
         o.signal?.throwIfAborted()
         const functions: ChatModelFunctions | undefined = o.tools?.length
           ? Object.fromEntries(o.tools.map((t) => [t.name, { description: t.description, params: relaxOptional(t.parameters) as never }]))
@@ -180,7 +198,8 @@ export class BuiltinClient implements ChatClient {
         )
         return result
       } catch (err) {
-        if ((err as Error).name === 'AbortError' || o.signal?.aborted) throw err
+        if ((err as Error).name === 'AbortError' || o.signal?.aborted || err instanceof ModelError) throw err
+        if (/insufficient memory|out of memory|failed to allocate/i.test(String(err))) throw new ModelError('no-memory', NO_MEMORY)
         throw new ModelError('http', `Modello integrato: ${err instanceof Error ? err.message : String(err)}`)
       } finally {
         touch()

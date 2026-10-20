@@ -46,7 +46,7 @@ export interface ChatClient {
   embed(model: string, texts: string[], signal?: AbortSignal): Promise<number[][]>
 }
 
-export type ModelErrorCode = 'connection' | 'no-tools' | 'no-think' | 'no-model' | 'http'
+export type ModelErrorCode = 'connection' | 'no-tools' | 'no-think' | 'no-model' | 'no-memory' | 'http'
 
 export class ModelError extends Error {
   constructor(

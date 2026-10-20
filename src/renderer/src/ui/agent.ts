@@ -216,7 +216,12 @@ export class AgentPanel {
     const rec = info?.models.find((m) => m.id === info.recommended)
     const installed = info?.models.find((m) => m.installed)
     const d = this.download
-    const error = d?.phase === 'error' ? `<p class="error">${esc(d.error ?? 'Download non riuscito')}</p>` : ''
+    const note =
+      d?.phase === 'error'
+        ? `<p class="error">${esc(d.error ?? 'Download non riuscito')}</p>`
+        : d?.phase === 'paused'
+          ? `<p class="muted dl-note">${esc(d.error ?? 'Download in pausa.')}</p>`
+          : ''
     if (d && (d.phase === 'downloading' || d.phase === 'verifying')) {
       const pct = d.total ? (d.received / d.total) * 100 : 0
       const eta = d.speed && d.phase === 'downloading' ? ` · ${duration((d.total - d.received) / d.speed)}` : ''
@@ -230,12 +235,12 @@ export class AgentPanel {
         </div>`
     }
     if (installed && this.settings.provider !== 'builtin')
-      return `<button class="btn primary" data-use-builtin="${installed.id}">${icons.check}Usa il modello integrato (${esc(installed.label)})</button>${error}`
-    if (!rec) return error
+      return `<button class="btn primary" data-use-builtin="${installed.id}">${icons.check}Usa il modello integrato (${esc(installed.label)})</button>${note}`
+    if (!rec) return note
     const partial = rec.partial || (d?.id === rec.id ? d.received : 0)
     return `<button class="btn primary" data-dl="${rec.id}">${icons.download}${
       partial ? `Riprendi il download (${gb(partial)} di ${gb(rec.size)} GB)` : `Scarica il modello consigliato (${gb(rec.size)} GB)`
-    }</button>${error}`
+    }</button>${note}`
   }
 
   private onDownload(p: ModelDownloadProgress): void {
@@ -338,6 +343,8 @@ export class AgentPanel {
       case 'error':
         this.appendOther('error', e.message)
         this.finish()
+        // the built-in model may have just been found damaged and removed
+        if (this.settings.provider === 'builtin') void this.refreshStatus()
         break
       case 'done':
         this.finish()

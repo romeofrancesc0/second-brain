@@ -166,8 +166,9 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
       await downloadModel(dataDir, id, (p) => send('builtin:progress', p), download.signal)
       return { ok: true }
     } catch (err) {
-      const error = download.signal.aborted ? 'Download in pausa: riprendi quando vuoi.' : err instanceof Error ? err.message : String(err)
-      send('builtin:progress', { id, received: 0, total: 0, phase: 'error', error } satisfies ModelDownloadProgress)
+      const paused = download.signal.aborted
+      const error = paused ? 'Download in pausa: riprendi quando vuoi.' : err instanceof Error ? err.message : String(err)
+      send('builtin:progress', { id, received: 0, total: 0, phase: paused ? 'paused' : 'error', error } satisfies ModelDownloadProgress)
       return { ok: false, error }
     } finally {
       download = null
