@@ -20,11 +20,11 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "dist": "electron-vite build && electron-builder --mac",
+    "dist": "electron-vite build && electron-builder --mac --publish never",
     "app": "electron-vite build && electron-builder --mac --dir --arm64",
     "icon": "electron scripts/make-icon.cjs",
     "app:win": "electron-vite build && electron-builder --win --dir --x64",
-    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:win": "electron-vite build && electron-builder --win --publish never",
     "service": "node out/main/server.js"
   },
   "build": {
