@@ -6,3 +6,4 @@ dist/
 .env
 .env.*
 server.json
+resources/llama/

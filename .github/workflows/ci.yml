@@ -15,7 +15,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-        env:
-          NODE_LLAMA_CPP_SKIP_DOWNLOAD: 'true'
       - run: npm run typecheck
       - run: npx electron-vite build

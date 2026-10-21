@@ -653,11 +653,14 @@ export class AgentPanel {
     el.innerHTML = info.models
       .map((m) => {
         const busy = d && d.id === m.id && (d.phase === 'downloading' || d.phase === 'verifying')
-        const right = m.installed
-          ? `<span class="muted">scaricato</span>`
-          : busy
-            ? `<span class="muted">${d.phase === 'verifying' ? 'verifico…' : `${Math.floor((d.received / (d.total || 1)) * 100)}%`}</span><button class="link-btn" data-dl-cancel>Pausa</button>`
-            : `<button class="link-btn" data-dl="${m.id}">${m.partial ? 'Riprendi' : 'Scarica'} · ${gb(m.size)} GB</button>`
+        const right = busy
+          ? `<span class="muted">${d.phase === 'verifying' ? 'verifico…' : `${Math.floor((d.received / (d.total || 1)) * 100)}%`}</span><button class="link-btn" data-dl-cancel>Pausa</button>`
+          : m.installed && m.vision
+            ? `<span class="muted">scaricato</span>`
+            : m.installed
+              ? // downloaded before the vision file existed: add it on its own
+                `<button class="link-btn" data-dl="${m.id}">Aggiungi la lettura delle immagini · ${gb(m.visionSize)} GB</button>`
+              : `<button class="link-btn" data-dl="${m.id}">${m.partial ? 'Riprendi' : 'Scarica'} · ${gb(m.size)} GB</button>`
         return `<div class="builtin-row"><span>${esc(m.label)}${m.id === info.recommended ? ' <em>consigliato</em>' : ''}</span>${right}</div>`
       })
       .join('')

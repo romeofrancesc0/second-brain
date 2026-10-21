@@ -109,6 +109,18 @@ export class VaultKnowledge {
     }
   }
 
+  /** A non-note file of the vault (an image embedded with ![[...]], or a raw source by name or path), resolved like Obsidian does. */
+  resolveAttachment(ref: string, from = ''): string | null {
+    const raw = String(ref ?? '')
+      .trim()
+      .replace(/^!?\[\[|\]\]$/g, '')
+      .split('|')[0]
+      .trim()
+    if (!raw) return null
+    const resolved = this.scan.resolver.resolve(raw, from)
+    return resolved && !resolved.endsWith('.md') ? resolved : null
+  }
+
   isNote(id: string): boolean {
     const k = this.nodes.get(id)?.kind
     return k === 'note' || k === 'moc'

@@ -62,6 +62,7 @@ export class AgentSession {
 
     let useTools = true
     let think = s.think
+    const vision = (await client.canSee?.(s.model).catch(() => false)) ?? false
     const seen = new Set<string>()
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
@@ -78,7 +79,7 @@ export class AgentSession {
           res = await client.chat({
             model: s.model,
             messages: this.history,
-            tools: useTools ? toolSpecs(readOnly) : undefined,
+            tools: useTools ? toolSpecs(readOnly, vision) : undefined,
             temperature: s.temperature,
             numCtx: s.numCtx,
             think,
@@ -139,6 +140,8 @@ export class AgentSession {
           seen.add(key)
           const result = await this.runTool(call, `${run}-${step}-${i}`, base, s, signal)
           this.history.push({ role: 'tool', content: result.content, toolCallId: call.id, toolName: call.name })
+          // tool messages cannot carry pictures: they follow as a user message
+          if (result.images?.length) this.history.push({ role: 'user', content: `Immagine richiesta con ${call.name}:`, images: result.images })
         }
         if (step === MAX_STEPS - 1) emit({ type: 'notice', message: 'Raggiunto il numero massimo di passi per questa risposta.' })
       }
@@ -148,8 +151,18 @@ export class AgentSession {
       else emit({ type: 'error', message: err instanceof Error ? err.message : String(err) })
     } finally {
       this.repairHistory()
+      this.dropImages()
       this.running = false
       this.abort = null
+    }
+  }
+
+  /** Pictures are heavy: once a reply is done they leave the history, and the model sees a note instead. */
+  private dropImages(): void {
+    for (const m of this.history) {
+      if (!m.images?.length) continue
+      delete m.images
+      m.content += ' (immagine già esaminata, non più allegata: se serve, guardala di nuovo con view_image)'
     }
   }
 
