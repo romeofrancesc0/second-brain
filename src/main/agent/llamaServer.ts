@@ -47,7 +47,13 @@ export function serverBinary(): string {
   const target = `${process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : process.platform}-${process.arch}`
   const exe = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'
   const packaged = process.resourcesPath ? join(process.resourcesPath, 'llama', target, exe) : ''
-  return packaged && existsSync(packaged) ? packaged : join(__dirname, '..', '..', 'resources', 'llama', target, exe)
+  if (packaged && existsSync(packaged)) return packaged
+  // development: the bundle sits in out/main or out/main/chunks, the binaries in <repo>/resources/llama
+  for (let up = 1; up <= 4; up++) {
+    const dev = join(__dirname, ...Array<string>(up).fill('..'), 'resources', 'llama', target, exe)
+    if (existsSync(dev)) return dev
+  }
+  return packaged || join(__dirname, 'llama-server-not-found')
 }
 
 function freePort(): Promise<number> {
