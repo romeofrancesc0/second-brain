@@ -19,7 +19,8 @@ export class BuiltinClient implements ChatClient {
     // a damaged file can crash llama.cpp's loader: check it first (fast once verified)
     if (!(await verifyModel(this.dataDir, m.id)))
       throw new ModelError('no-model', "Il file del modello era danneggiato e l'ho rimosso: scaricalo di nuovo dalle impostazioni dell'agente.")
-    const mmproj = await installedVision(this.dataDir, m.id)
+    // without images (Eco) the vision file is not loaded: less memory and a faster start
+    const mmproj = o.vision === false ? null : await installedVision(this.dataDir, m.id)
     let server
     try {
       server = await ensureServer({ model: join(modelsDir(this.dataDir), m.file), mmproj: mmproj ?? undefined, numCtx: o.numCtx }, join(this.dataDir, 'logs'))

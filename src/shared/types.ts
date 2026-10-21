@@ -108,6 +108,41 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fps: 60
 }
 
+/**
+ * How the whole app behaves. Basic is the full app; Eco keeps the Mac cool: lighter graphics on top of
+ * the saved settings (which it never changes) and a read-only agent that does not look at images.
+ */
+export type AppMode = 'basic' | 'eco'
+export const DEFAULT_MODE: AppMode = 'basic'
+
+export interface ModeInfo {
+  id: AppMode
+  label: string
+  /** One line for the mode menu. */
+  summary: string
+  /** What the mode turns down, shown to the user. */
+  limits: string[]
+}
+
+export const MODES: ModeInfo[] = [
+  {
+    id: 'basic',
+    label: 'Basic',
+    summary: 'Tutta l’app: grafica come nelle Impostazioni e agente completo.',
+    limits: []
+  },
+  {
+    id: 'eco',
+    label: 'Eco',
+    summary: 'Consumo minimo, per tenere il computer fresco e silenzioso.',
+    limits: [
+      'Grafica a 30 fps al massimo, a risoluzione normale invece che Retina, senza bagliore, grana e profondità di campo, con meno atmosfera.',
+      'Agente in sola lettura: cerca e legge le note, ma non crea, modifica o sposta nulla.',
+      'Niente immagini: l’agente non guarda le immagini delle note.'
+    ]
+  }
+]
+
 /** Bumped when the defaults change enough that saved appearance settings should be reset. */
 export const SETTINGS_VERSION = 3
 
@@ -226,6 +261,9 @@ export interface SecondBrainApi {
   saveLayout(positions: Record<string, [number, number, number]>): Promise<void>
   getSettings(): Promise<AppSettings>
   saveSettings(settings: AppSettings): Promise<void>
+  getMode(): Promise<AppMode>
+  /** Saves the mode and applies it to the agent at once (the renderer applies it to the graphics). */
+  setMode(mode: AppMode): Promise<void>
   openInObsidian(id: string): Promise<void>
   openFile(id: string): Promise<void>
   revealInFinder(id: string): Promise<void>

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, promises as fs, watch, type FSWatcher } from 'node:fs'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { DEFAULT_SETTINGS, SETTINGS_VERSION, type AiSettings, type AppSettings, type KnownVault, type VaultGraph } from '@shared/types'
+import { DEFAULT_MODE, DEFAULT_SETTINGS, MODES, SETTINGS_VERSION, type AiSettings, type AppMode, type AppSettings, type KnownVault, type VaultGraph } from '@shared/types'
 import { VaultKnowledge } from './agent/knowledge'
 import { obsidianConfigPath } from './platform'
 import { registerAgent } from './agentIpc'
@@ -32,7 +32,10 @@ interface Config {
   settings?: Partial<AppSettings>
   settingsVersion?: number
   ai?: Partial<AiSettings>
+  mode?: AppMode
 }
+
+const modeOf = (m: unknown): AppMode => (MODES.some((x) => x.id === m) ? (m as AppMode) : DEFAULT_MODE)
 
 async function readJson<T>(path: string, fallback: T): Promise<T> {
   try {
@@ -42,14 +45,23 @@ async function readJson<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
+/** Writes to a temporary file and renames it: a reader never sees a half-written file. */
 async function writeJson(path: string, data: unknown): Promise<void> {
   await fs.mkdir(join(path, '..'), { recursive: true })
-  await fs.writeFile(path, JSON.stringify(data))
+  const tmp = `${path}.${process.pid}.tmp`
+  await fs.writeFile(tmp, JSON.stringify(data))
+  await fs.rename(tmp, path)
 }
 
-async function updateConfig(patch: Partial<Config>): Promise<void> {
-  const cfg = await readJson<Config>(configPath(), {})
-  await writeJson(configPath(), { ...cfg, ...patch })
+/** Config updates run one at a time, so two close saves (e.g. mode and view) never lose each other's fields. */
+let configQueue: Promise<unknown> = Promise.resolve()
+function updateConfig(patch: Partial<Config>): Promise<void> {
+  const run = configQueue.then(async () => {
+    const cfg = await readJson<Config>(configPath(), {})
+    await writeJson(configPath(), { ...cfg, ...patch })
+  })
+  configQueue = run.catch(() => undefined)
+  return run
 }
 
 async function knownVaults(): Promise<KnownVault[]> {
@@ -111,7 +123,14 @@ function registerIpc(): void {
     knowledge: () => knowledge,
     rescan: rescanNow,
     loadAi: async () => (await readJson<Config>(configPath(), {})).ai,
-    saveAi: (ai) => updateConfig({ ai })
+    saveAi: (ai) => updateConfig({ ai }),
+    loadMode: async () => modeOf((await readJson<Config>(configPath(), {})).mode)
+  })
+  ipcMain.handle('mode:get', async () => modeOf((await readJson<Config>(configPath(), {})).mode))
+  ipcMain.handle('mode:set', async (_e, m: AppMode) => {
+    const mode = modeOf(m)
+    agent?.setMode(mode)
+    await updateConfig({ mode })
   })
   ipcMain.handle('vaults:known', () => knownVaults())
   ipcMain.handle('vaults:last', async () => (await readJson<Config>(configPath(), {})).lastVault ?? null)

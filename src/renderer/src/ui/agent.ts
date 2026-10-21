@@ -56,6 +56,7 @@ export class AgentPanel {
   private download: ModelDownloadProgress | null = null
   private index: IndexStatus | null = null
   private running = false
+  private eco = false
   private segments: Segment[] = []
   private message: HTMLElement | null = null
   private tools = new Map<string, { call: AgentToolCall; el: HTMLElement }>()
@@ -92,6 +93,7 @@ export class AgentPanel {
           <button class="icon-btn sm" data-action="close" title="Chiudi (⌘J)">${icons.close}</button>
         </div>
       </div>
+      <div class="agent-eco hidden">${icons.leaf}<span><b>Modalità Eco</b> · l’agente cerca e legge le note, ma non crea né modifica nulla e non guarda le immagini. Passa a Basic per l’agente completo.</span></div>
       <div class="agent-chat">
         <div class="agent-messages"></div>
         <form class="agent-composer">
@@ -149,6 +151,13 @@ export class AgentPanel {
   }
 
   /** Opens the panel straight on the model settings. */
+  /** Eco mode: the main process only offers read tools and no images; the panel says so. */
+  setEco(on: boolean): void {
+    this.eco = on
+    this.root.querySelector('.agent-eco')!.classList.toggle('hidden', !on)
+    this.root.classList.toggle('eco', on)
+  }
+
   openSettings(): void {
     this.toggle(true)
     this.showSettings(true)

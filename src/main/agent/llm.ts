@@ -31,6 +31,8 @@ export interface ChatOptions {
   temperature: number
   numCtx: number
   think: boolean
+  /** false: do not prepare image input (Eco); the built-in model then skips its vision file. */
+  vision?: boolean
   signal?: AbortSignal
   onText?: (delta: string) => void
   onReasoning?: (delta: string) => void

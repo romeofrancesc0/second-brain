@@ -140,6 +140,7 @@ export class SettingsDialog {
   onChangeVault?: () => void
   onOpenAgent?: () => void
   private section: Section = 'theme'
+  private eco = false
   private vault = { name: '', path: '', notes: 0, links: 0 }
   private body!: HTMLElement
 
@@ -170,6 +171,12 @@ export class SettingsDialog {
 
   get isOpen(): boolean {
     return !this.el.classList.contains('hidden')
+  }
+
+  /** Eco mode lightens the graphics on top of these settings: say so where they are edited. */
+  setEco(on: boolean): void {
+    this.eco = on
+    if (this.isOpen) this.paint()
   }
 
   open(section?: Section): void {
@@ -275,8 +282,13 @@ export class SettingsDialog {
     this.el.querySelectorAll<HTMLElement>('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.section === this.section))
     const meta = SECTIONS.find((s) => s.id === this.section)!
     const scroll = this.body.scrollTop
+    const ecoNote =
+      this.eco && (this.section === 'theme' || this.section === 'motion')
+        ? `<p class="eco-note">${icons.leaf}<span>Modalità Eco attiva: la grafica gira a 30 fps al massimo, a risoluzione normale, senza bagliore, grana e profondità di campo e con meno atmosfera. Queste impostazioni restano salvate e tornano in uso passando a Basic.</span></p>`
+        : ''
     this.body.innerHTML = `
       <header class="settings-head"><h2>${meta.label}</h2><p>${meta.lead}</p></header>
+      ${ecoNote}
       ${this.renderSection()}`
     this.body.querySelectorAll<HTMLInputElement>('input[type=range]').forEach(setFill)
     this.body.scrollTop = scroll

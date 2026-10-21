@@ -1,7 +1,7 @@
 import 'katex/dist/katex.min.css'
 import './styles.css'
 import type { Color } from 'three'
-import { DEFAULT_SETTINGS, type AppSettings, type GraphNode, type VaultGraph, type ViewMode } from '@shared/types'
+import { DEFAULT_MODE, DEFAULT_SETTINGS, MODES, type AppMode, type AppSettings, type GraphNode, type VaultGraph, type ViewMode } from '@shared/types'
 import { Brain } from './graph/Brain'
 import { AgentPanel } from './ui/agent'
 import { buildPalette } from './graph/palette'
@@ -9,6 +9,7 @@ import { VIEWS, isLight, onSystemToneChange } from './graph/views'
 import { Dock } from './ui/dock'
 import { icons } from './ui/icons'
 import { Legend } from './ui/legend'
+import { ModeMenu } from './ui/mode'
 import { NotePanel } from './ui/panel'
 import { SearchPalette } from './ui/search'
 import { SettingsDialog } from './ui/settings'
@@ -34,6 +35,7 @@ document.documentElement.dataset.platform = /Mac/.test(navigator.userAgent) ? 'm
 
 async function boot(): Promise<void> {
   settings = { ...DEFAULT_SETTINGS, ...(await window.api.getSettings()) }
+  let mode: AppMode = (await window.api.getMode()) ?? DEFAULT_MODE
   const mod = document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl '
   $('#search-btn').innerHTML = `${icons.search}<span>Cerca un neurone…</span><kbd>${mod}K</kbd>`
   $('#agent-btn').innerHTML = `${icons.agent}<span>Agente</span>`
@@ -47,6 +49,7 @@ async function boot(): Promise<void> {
   const settingsUi = new SettingsDialog($('#settings'), settings)
   const welcome = new Welcome($('#welcome'))
   const dock = new Dock($('#dock'))
+  const modeMenu = new ModeMenu($<HTMLButtonElement>('#mode-btn'), $('#mode-menu'))
   paintHint()
   const agentPanel = new AgentPanel($('#agent'), {
     resolve: (target) => {
@@ -120,6 +123,23 @@ async function boot(): Promise<void> {
     settingsUi.close()
     agentPanel.openSettings()
   }
+  /** Applies a mode everywhere at once, without touching the saved settings. */
+  function applyMode(m: AppMode): void {
+    mode = m
+    const eco = m === 'eco'
+    brain.setEco(eco)
+    settingsUi.setEco(eco)
+    agentPanel.setEco(eco)
+    modeMenu.set(m)
+    document.documentElement.dataset.mode = m
+  }
+  applyMode(mode)
+  modeMenu.onChange = (m) => {
+    applyMode(m)
+    void window.api.setMode(m)
+    toast(m === 'eco' ? 'Modalità Eco: grafica leggera, agente in sola lettura' : `Modalità ${MODES.find((x) => x.id === m)!.label}`)
+  }
+
   dock.onZoom = (f) => brain.zoom(f)
   dock.onHome = () => brain.resetView()
   onSystemToneChange(() => {
