@@ -47,10 +47,9 @@ const HAZE_BLOBS = 9
 const REST_FPS = 1
 /** How long the loop keeps the full frame rate after the last input or animation. */
 const LINGER_MS = 1800
-/** Auto-rotation starts after this much inactivity and stops (so the loop can rest) after AUTO_ROTATE_END_MS. */
-const AUTO_ROTATE_START_MS = 4000
-const AUTO_ROTATE_END_MS = 30000
+/** Auto-rotation: one slow turn when the app opens, braking evenly over the last BRAKE radians (about 3 s). */
 const AUTO_ROTATE_SPEED = 0.25
+const AUTO_ROTATE_BRAKE = 0.04
 /** Damping of the orbit controls per frame at 60 fps (scaled to the actual frame time). */
 const DAMPING = 0.07
 
@@ -153,7 +152,10 @@ export class Brain {
   private settings: AppSettings
   private screen = new Float32Array(0) // x, y, depth, radiusPx per node
   private projMatrix = new THREE.Matrix4()
-  private lastInteraction = performance.now()
+  /** Radians left of the single turn made when the app opens; any input cancels it for good. */
+  private openingTurn = Math.PI * 2
+  /** Clock of the shader effects: stands still in the hologram while the window has no focus. */
+  private effectTime = 0
   private boundsRadius = 400
 
   // render loop: full frame rate while something moves, REST_FPS otherwise, nothing while hidden
@@ -194,7 +196,7 @@ export class Brain {
     this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED
     this.controls.addEventListener('start', () => {
       this.flight = null
-      this.lastInteraction = performance.now()
+      this.openingTurn = 0
       this.requestActive(LINGER_MS, true)
     })
 
@@ -567,7 +569,7 @@ export class Brain {
   zoom(factor: number): void {
     const offset = this.camera.position.clone().sub(this.controls.target)
     const dist = THREE.MathUtils.clamp(offset.length() * factor, this.controls.minDistance, this.controls.maxDistance)
-    this.lastInteraction = performance.now()
+    this.openingTurn = 0
     this.flyTo(this.controls.target.clone(), offset.setLength(dist), 380)
   }
 
@@ -591,6 +593,7 @@ export class Brain {
 
   select(id: string | null, fly = true): void {
     const idx = id ? (this.indexById.get(id) ?? -1) : -1
+    if (idx >= 0) this.openingTurn = 0
     this.selected = idx
     this.refreshStates()
     if (idx >= 0 && fly) this.flyToNode(idx)
@@ -605,6 +608,7 @@ export class Brain {
   /** Highlights the neurons the agent is working on; optionally flies the camera to frame them. */
   setAgentFocus(ids: string[], fly: boolean): void {
     this.agentFocus = new Set(ids.map((id) => this.indexById.get(id)).filter((i): i is number => i !== undefined))
+    if (fly && this.agentFocus.size) this.openingTurn = 0
     this.refreshStates()
     if (!fly || !this.agentFocus.size || this.selected >= 0) return
     const pts = [...this.agentFocus].map((i) => this.nodeWorld(i))
@@ -822,6 +826,7 @@ export class Brain {
   }
 
   resetView(): void {
+    this.openingTurn = 0
     this.select(null)
     this.flyTo(this.homeTarget(), this.homeOffset(), 1600)
   }
@@ -1098,7 +1103,7 @@ export class Brain {
     })
     el.addEventListener('wheel', () => {
       this.flight = null
-      this.lastInteraction = performance.now()
+      this.openingTurn = 0
       this.requestActive(LINGER_MS, true)
     })
 
@@ -1108,7 +1113,7 @@ export class Brain {
       if (['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(k)) {
         this.keys.add(k)
         this.flight = null
-        this.lastInteraction = performance.now()
+        this.openingTurn = 0
         this.requestActive(LINGER_MS, true)
       }
     })
@@ -1191,8 +1196,11 @@ export class Brain {
   private frame(): void {
     this.timer.update()
     // after a pause (rest, hidden window) restart smoothly instead of catching up in one jump
-    const dt = Math.min(this.timer.getDelta(), 2 / this.fps)
-    const time = this.timer.getElapsed()
+    const delta = Math.min(this.timer.getDelta(), 1.1)
+    const dt = Math.min(delta, 2 / this.fps)
+    // the hologram effects stop altogether in the background and pick up where they were
+    if (this.focused || this.view !== 'hologram') this.effectTime += delta
+    const time = this.effectTime
     const flying = !!this.flight || this.keys.size > 0
     this.neuronMat.uniforms.uTime.value = time
 
@@ -1231,12 +1239,15 @@ export class Brain {
       }
     }
 
-    const idleMs = performance.now() - this.lastInteraction
-    const idle = idleMs > AUTO_ROTATE_START_MS && idleMs < AUTO_ROTATE_END_MS
     // only while the window has focus: in the background the loop rests
-    this.controls.autoRotate = this.settings.autoRotate && this.focused && this.selected < 0 && !this.flight && idle
-    // slows down over the last two seconds instead of stopping dead
-    this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED * THREE.MathUtils.smoothstep(AUTO_ROTATE_END_MS - idleMs, 0, 2000)
+    this.controls.autoRotate =
+      this.settings.autoRotate && this.openingTurn > 0 && this.focused && this.selected < 0 && !this.flight && !this.layoutRunning && this.nodes.length > 0
+    if (this.controls.autoRotate) {
+      // brakes gently at the end of the turn instead of stopping dead (constant deceleration: speed ∝ √distance left)
+      this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED * THREE.MathUtils.clamp(Math.sqrt(this.openingTurn / AUTO_ROTATE_BRAKE), 0.03, 1)
+      // same angle OrbitControls turns by in update(dt)
+      this.openingTurn = Math.max(this.openingTurn - ((2 * Math.PI) / 60) * this.controls.autoRotateSpeed * dt, 0)
+    }
     // the same inertia in seconds whatever the frame rate
     this.controls.dampingFactor = 1 - Math.pow(1 - DAMPING, dt * 60)
     const orbiting = this.controls.update(dt)
@@ -1302,8 +1313,10 @@ export class Brain {
 
     this.composer.render(dt)
 
-    // everything that moves the scene keeps the full frame rate (shader effects alone do not)
-    if (flying || orbiting || warping || dimming || this.pointer.down || this.layoutRunning || this.controls.autoRotate) {
+    // everything that moves the scene keeps the full frame rate (other shader effects alone do not)
+    // the hologram is always animated while the window has focus
+    const holo = this.view === 'hologram' && this.focused
+    if (flying || orbiting || warping || dimming || holo || this.pointer.down || this.layoutRunning || this.controls.autoRotate) {
       this.activeUntil = Math.max(this.activeUntil, performance.now() + LINGER_MS)
     }
   }
