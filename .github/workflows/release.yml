@@ -33,12 +33,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-        env:
-          # llama.cpp ships prebuilt binaries: never build it from source on CI
-          NODE_LLAMA_CPP_SKIP_DOWNLOAD: 'true'
-      # the arm64 runner also builds the Intel dmg: add the x64 llama.cpp binaries npm skipped
-      - if: runner.os == 'macOS'
-        run: npm install --no-save --force --ignore-scripts @node-llama-cpp/mac-x64@$(node -p "require('./package.json').dependencies['node-llama-cpp']")
       - run: npm run typecheck
       - run: npm run ${{ matrix.script }}
         env:

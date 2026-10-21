@@ -48,10 +48,14 @@ export interface ToolResult {
   ids: string[]
   change?: AppliedChange
   rejected?: boolean
+  /** Pictures the model should look at next (data URIs): only from tools marked `vision`. */
+  images?: string[]
 }
 
 export interface ToolDef extends ToolSpec {
   write?: boolean
+  /** Offered only to models that can look at images. */
+  vision?: boolean
   label(args: Record<string, unknown>): string
   /** What the agent is doing while the tool runs, e.g. "Cerco «trasformata z» in Segnali". */
   activity(args: Record<string, unknown>): string
@@ -62,6 +66,22 @@ export interface ToolDef extends ToolSpec {
 
 const PROTECTED_FOLDERS = ['fonti'] // raw sources: never modified (vault rule)
 const MAX_NOTE_CHARS = 7000
+
+/** Image formats llama.cpp decodes (stb_image); others (HEIC, WebP, SVG…) are refused with a clear message. */
+const IMAGE_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp' }
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024
+const IMAGE_EXT = /\.(png|jpe?g|gif|bmp|webp|heic|heif|tiff?|svg|avif)$/i
+
+/** Images a note embeds, as written in it: ![[foto.png]] and ![testo](cartella/foto.jpg). */
+function embeddedImages(body: string): string[] {
+  const out = new Set<string>()
+  for (const m of body.matchAll(/!\[\[([^\]|#]+)/g)) if (IMAGE_EXT.test(m[1].trim())) out.add(m[1].trim())
+  for (const m of body.matchAll(/!\[[^\]]*\]\(([^)\s]+)/g)) {
+    const target = decodeURIComponent(m[1].trim())
+    if (IMAGE_EXT.test(target) && !/^[a-z]+:\/\//i.test(target)) out.add(target)
+  }
+  return [...out]
+}
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim()
 /** " in <course or area>" when the arguments restrict the tool to one region of the vault. */
@@ -308,6 +328,7 @@ export const TOOLS: ToolDef[] = [
       const out = [...(k.out.get(r.id) ?? [])].filter((x) => k.isNote(x))
       const back = [...(k.in.get(r.id) ?? [])].filter((x) => k.isNote(x))
       const body = note.body.length > MAX_NOTE_CHARS ? note.body.slice(0, MAX_NOTE_CHARS) + '\n…(troncata)' : note.body
+      const images = embeddedImages(note.body)
       return {
         content: [
           `Titolo: ${node.title}`,
@@ -319,12 +340,45 @@ export const TOOLS: ToolDef[] = [
           body.trim(),
           '',
           `Link in uscita: ${out.map((x) => link(k, x)).join(', ') || 'nessuno'}`,
-          `Backlink: ${back.map((x) => link(k, x)).join(', ') || 'nessuno'}`
+          `Backlink: ${back.map((x) => link(k, x)).join(', ') || 'nessuno'}`,
+          ...(images.length ? [`Immagini nella nota: ${images.map((i) => `![[${i}]]`).join(', ')}`] : [])
         ]
           .filter((l, i) => l !== '' || i > 4)
           .join('\n'),
         summary: `${node.words} parole`,
         ids: [r.id]
+      }
+    }
+  },
+  {
+    name: 'view_image',
+    vision: true,
+    description:
+      'Look at an image of the vault (a photo, a scan, a diagram, a slide): one embedded in a note with ![[...]] or a raw source file, by name or vault path. Use it when the picture matters for the answer.',
+    parameters: {
+      type: 'object',
+      properties: {
+        image: { type: 'string', description: 'The image as written in the note, e.g. "lavagna.jpg" or "Allegati/schema.png"' },
+        note: { type: 'string', description: 'The note that embeds it, to find it like Obsidian does' }
+      },
+      required: ['image']
+    },
+    label: (a) => `Guarda «${str(a.image)}»`,
+    activity: (a) => `Guardo «${str(a.image)}»`,
+    async run(a, ctx) {
+      const k = ctx.knowledge()
+      const from = str(a.note) ? k.resolveNote(str(a.note)) : null
+      const id = k.resolveAttachment(str(a.image), from && 'id' in from ? from.id : '')
+      if (!id) return { content: `Immagine "${str(a.image)}" non trovata nel vault.`, summary: 'Immagine non trovata', ids: [] }
+      const type = IMAGE_TYPES[id.split('.').pop()!.toLowerCase()]
+      if (!type) return { content: `Formato non supportato (${id}): posso guardare PNG, JPEG, GIF e BMP.`, summary: 'Formato non supportato', ids: [id] }
+      const data = await fs.readFile(safeVaultPath(ctx.vaultPath, id))
+      if (data.length > MAX_IMAGE_BYTES) return { content: `L'immagine ${id} è troppo grande (${Math.round(data.length / 1e6)} MB).`, summary: 'Immagine troppo grande', ids: [id] }
+      return {
+        content: `Ecco l'immagine ${id}: la trovi nel messaggio seguente.`,
+        summary: `${Math.round(data.length / 1024)} KB`,
+        ids: [id],
+        images: [`data:${type};base64,${data.toString('base64')}`]
       }
     }
   },
@@ -565,6 +619,6 @@ function majorityArea(k: VaultKnowledge, corso: string): string {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
 }
 
-export function toolSpecs(readOnly = false): ToolSpec[] {
-  return TOOLS.filter((t) => !readOnly || !t.write).map(({ name, description, parameters }) => ({ name, description, parameters }))
+export function toolSpecs(readOnly = false, vision = false): ToolSpec[] {
+  return TOOLS.filter((t) => (!readOnly || !t.write) && (vision || !t.vision)).map(({ name, description, parameters }) => ({ name, description, parameters }))
 }

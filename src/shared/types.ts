@@ -151,7 +151,8 @@ export interface AiStatus {
 }
 
 export interface BuiltinModelInfo {
-  models: { id: string; label: string; size: number; installed: boolean; partial: number }[]
+  /** size: model + vision file. installed: the model can chat; vision: it can also read images. partial: bytes already fetched. */
+  models: { id: string; label: string; size: number; installed: boolean; vision: boolean; visionSize: number; partial: number }[]
   /** Chosen from the total RAM of this computer. */
   recommended: string
   ramGb: number

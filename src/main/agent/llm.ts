@@ -14,6 +14,8 @@ export interface ChatMessage {
   toolCalls?: ToolCall[]
   toolCallId?: string
   toolName?: string
+  /** Pictures for vision models, as data URIs (user messages only). */
+  images?: string[]
 }
 
 export interface ToolSpec {
@@ -44,6 +46,8 @@ export interface ChatClient {
   listModels(signal?: AbortSignal): Promise<string[]>
   chat(opts: ChatOptions): Promise<ChatResult>
   embed(model: string, texts: string[], signal?: AbortSignal): Promise<number[][]>
+  /** Whether this model can look at images (sent as `ChatMessage.images`). */
+  canSee?(model: string): Promise<boolean>
 }
 
 export type ModelErrorCode = 'connection' | 'no-tools' | 'no-think' | 'no-model' | 'no-memory' | 'http'
@@ -177,6 +181,7 @@ class OllamaClient implements ChatClient {
             ...(m.toolCalls?.length ? { tool_calls: m.toolCalls.map((c) => ({ function: { name: c.name, arguments: c.args } })) } : {})
           }
         if (m.role === 'tool') return { role: 'tool', content: m.content, tool_name: m.toolName }
+        if (m.images?.length) return { role: m.role, content: m.content, images: m.images.map((u) => u.replace(/^data:[^,]*,/, '')) }
         return { role: m.role, content: m.content }
       }),
       options: { num_ctx: o.numCtx, temperature: o.temperature },
@@ -258,11 +263,20 @@ class OllamaClient implements ChatClient {
 
 /* ------------------------------------------------ OpenAI-compatible (LM Studio, …) */
 
-class OpenAICompatClient implements ChatClient {
-  constructor(private base: string) {}
+export interface OpenAICompatOptions {
+  headers?: Record<string, string>
+  /** Extra fields for the chat request, e.g. llama-server's chat_template_kwargs. */
+  extraBody?: (o: ChatOptions) => Record<string, unknown>
+}
+
+export class OpenAICompatClient implements ChatClient {
+  constructor(
+    private base: string,
+    private opts: OpenAICompatOptions = {}
+  ) {}
 
   async listModels(signal?: AbortSignal): Promise<string[]> {
-    const res = await request(this.base + '/models', { signal })
+    const res = await request(this.base + '/models', { signal, headers: this.opts.headers })
     const j = (await res.json()) as { data?: { id: string }[] }
     return (j.data ?? []).map((m) => m.id).sort()
   }
@@ -288,13 +302,19 @@ class OpenAICompatClient implements ChatClient {
               : {})
           }
         if (m.role === 'tool') return { role: 'tool', tool_call_id: m.toolCallId, content: m.content }
+        if (m.images?.length)
+          return {
+            role: m.role,
+            content: [{ type: 'text', text: m.content }, ...m.images.map((url) => ({ type: 'image_url', image_url: { url } }))]
+          }
         return { role: m.role, content: m.content }
-      })
+      }),
+      ...this.opts.extraBody?.(o)
     }
     if (o.tools?.length) body.tools = o.tools.map((t) => ({ type: 'function', function: t }))
     const res = await request(this.base + '/chat/completions', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...this.opts.headers },
       body: JSON.stringify(body),
       signal: o.signal
     })
@@ -355,7 +375,7 @@ class OpenAICompatClient implements ChatClient {
   async embed(model: string, texts: string[], signal?: AbortSignal): Promise<number[][]> {
     const res = await request(this.base + '/embeddings', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...this.opts.headers },
       body: JSON.stringify({ model, input: texts }),
       signal
     })
