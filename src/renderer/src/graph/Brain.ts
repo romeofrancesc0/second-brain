@@ -154,7 +154,7 @@ export class Brain {
   private projMatrix = new THREE.Matrix4()
   /** Radians left of the single turn made when the app opens; any input cancels it for good. */
   private openingTurn = Math.PI * 2
-  /** Clock of the shader effects: stands still in the hologram while the window has no focus. */
+  /** Clock of the shader effects: in the hologram it only runs while the loop is active (something moves). */
   private effectTime = 0
   private boundsRadius = 400
 
@@ -1198,8 +1198,9 @@ export class Brain {
     // after a pause (rest, hidden window) restart smoothly instead of catching up in one jump
     const delta = Math.min(this.timer.getDelta(), 1.1)
     const dt = Math.min(delta, 2 / this.fps)
-    // the hologram effects stop altogether in the background and pick up where they were
-    if (this.focused || this.view !== 'hologram') this.effectTime += delta
+    // the hologram effects stop altogether at rest and pick up where they were, without a jump
+    if (this.view !== 'hologram') this.effectTime += delta
+    else if (this.active) this.effectTime += dt
     const time = this.effectTime
     const flying = !!this.flight || this.keys.size > 0
     this.neuronMat.uniforms.uTime.value = time
@@ -1314,9 +1315,7 @@ export class Brain {
     this.composer.render(dt)
 
     // everything that moves the scene keeps the full frame rate (other shader effects alone do not)
-    // the hologram is always animated while the window has focus
-    const holo = this.view === 'hologram' && this.focused
-    if (flying || orbiting || warping || dimming || holo || this.pointer.down || this.layoutRunning || this.controls.autoRotate) {
+    if (flying || orbiting || warping || dimming || this.pointer.down || this.layoutRunning || this.controls.autoRotate) {
       this.activeUntil = Math.max(this.activeUntil, performance.now() + LINGER_MS)
     }
   }
