@@ -1,10 +1,12 @@
 import { app, ipcMain, shell, type BrowserWindow } from 'electron'
 import { join } from 'node:path'
-import { DEFAULT_AI, type AgentEvent, type AiSettings, type AiStatus, type IndexStatus, type McpInfo } from '@shared/types'
+import { DEFAULT_AI, type AgentEvent, type AiSettings, type AiStatus, type IndexStatus, type McpInfo, type ModelDownloadProgress } from '@shared/types'
 import { AgentSession } from './agent/agent'
+import { disposeBuiltin } from './agent/builtin'
 import { EmbeddingIndex } from './agent/embeddings'
 import type { VaultKnowledge } from './agent/knowledge'
 import { createClient } from './agent/llm'
+import { downloadModel, modelInfo } from './agent/models'
 import { readVaultRules } from './agent/prompt'
 import { undoChange } from './agent/tools'
 
@@ -56,7 +58,7 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
     const k = deps.knowledge()
     if (!vault || !k || !settings.embedModel || indexing) return
     indexing = new AbortController()
-    const client = createClient(settings)
+    const client = createClient(settings, dataDir)
     pushIndexStatus({ running: true, error: undefined, done: 0, todo: undefined })
     try {
       const built = await EmbeddingIndex.build(
@@ -98,7 +100,7 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
         embedQuery: async (text) => {
           if (!index || !settings.embedModel) return null
           try {
-            const [v] = await createClient(settings).embed(settings.embedModel, [text])
+            const [v] = await createClient(settings, dataDir).embed(settings.embedModel, [text])
             return Float32Array.from(v)
           } catch {
             return null
@@ -123,7 +125,7 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
   ipcMain.handle('ai:status', async (_e, s?: AiSettings): Promise<AiStatus> => {
     await ready
     try {
-      const models = await createClient(s ?? settings).listModels(AbortSignal.timeout(4000))
+      const models = await createClient(s ?? settings, dataDir).listModels(AbortSignal.timeout(4000))
       return { ok: true, models }
     } catch (err) {
       return { ok: false, models: [], error: err instanceof Error ? err.message : String(err) }
@@ -155,6 +157,28 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
     return indexStatus
   })
   ipcMain.handle('index:build', () => buildIndex())
+  let download: AbortController | null = null
+  ipcMain.handle('builtin:models', () => modelInfo(dataDir))
+  ipcMain.handle('builtin:download', async (_e, id: string) => {
+    if (download) return { ok: false, error: 'Un download è già in corso.' }
+    download = new AbortController()
+    try {
+      await downloadModel(dataDir, id, (p) => send('builtin:progress', p), download.signal)
+      return { ok: true }
+    } catch (err) {
+      const paused = download.signal.aborted
+      const error = paused ? 'Download in pausa: riprendi quando vuoi.' : err instanceof Error ? err.message : String(err)
+      send('builtin:progress', { id, received: 0, total: 0, phase: paused ? 'paused' : 'error', error } satisfies ModelDownloadProgress)
+      return { ok: false, error }
+    } finally {
+      download = null
+    }
+  })
+  ipcMain.handle('builtin:cancel', () => download?.abort())
+  app.on('will-quit', () => {
+    download?.abort()
+    void disposeBuiltin()
+  })
   ipcMain.handle('mcp:info', (): McpInfo => {
     const script = join(app.getAppPath(), 'out', 'main', 'mcp.js')
     const args = [script, '--vault', deps.vault() ?? '/percorso/del/vault', '--data-dir', dataDir]

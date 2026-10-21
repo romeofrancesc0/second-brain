@@ -273,10 +273,19 @@ export const TOOLS: ToolDef[] = [
       const k = ctx.knowledge()
       const query = str(a.query)
       const queryVector = ctx.embedQuery ? await ctx.embedQuery(query) : null
-      const hits = k.search(query, { corso: str(a.corso) || undefined, area: str(a.area) || undefined, tag: str(a.tag) || undefined, limit: num(a.limit, 8), queryVector })
+      const filters = { corso: str(a.corso) || undefined, area: str(a.area) || undefined, tag: str(a.tag) || undefined }
+      let hits = k.search(query, { ...filters, limit: num(a.limit, 8), queryVector })
+      // small models often invent a course or area name: fall back to the whole vault
+      let note = ''
+      if (!hits.length && (filters.corso || filters.area || filters.tag)) {
+        hits = k.search(query, { limit: num(a.limit, 8), queryVector })
+        if (hits.length) note = 'Nessun risultato con i filtri indicati (corso/area/tag non trovati): ecco i risultati in tutto il vault.\n'
+      }
       if (!hits.length) return { content: 'Nessuna nota trovata. Prova con parole diverse o più generiche.', summary: 'Nessun risultato', ids: [] }
       return {
-        content: hits
+        content:
+          note +
+          hits
           .map((h, i) => `${i + 1}. ${link(k, h.id)}${h.corso ? ` (${h.corso})` : ''}${h.tags.length ? ` #${h.tags.slice(0, 5).join(' #')}` : ''}\n   ${h.snippet}`)
           .join('\n'),
         summary: `${hits.length} risultati`,

@@ -113,7 +113,8 @@ export const SETTINGS_VERSION = 3
 
 /* ------------------------------------------------------------------ AI agent */
 
-export type AiProvider = 'ollama' | 'openai'
+/** builtin = llama.cpp inside the app, with a model downloaded on first use (no Ollama needed). */
+export type AiProvider = 'ollama' | 'openai' | 'builtin'
 
 export interface AiSettings {
   provider: AiProvider
@@ -146,6 +147,23 @@ export const DEFAULT_AI: AiSettings = {
 export interface AiStatus {
   ok: boolean
   models: string[]
+  error?: string
+}
+
+export interface BuiltinModelInfo {
+  models: { id: string; label: string; size: number; installed: boolean; partial: number }[]
+  /** Chosen from the total RAM of this computer. */
+  recommended: string
+  ramGb: number
+}
+
+export interface ModelDownloadProgress {
+  id: string
+  received: number
+  total: number
+  phase: 'downloading' | 'verifying' | 'done' | 'paused' | 'error'
+  /** Bytes per second. */
+  speed?: number
   error?: string
 }
 
@@ -227,4 +245,9 @@ export interface SecondBrainApi {
   indexBuild(): Promise<void>
   onIndexStatus(cb: (s: IndexStatus) => void): () => void
   mcpInfo(): Promise<McpInfo>
+  builtinModels(): Promise<BuiltinModelInfo>
+  /** Downloads a model for the built-in provider (resumes a partial download). */
+  builtinDownload(id: string): Promise<{ ok: boolean; error?: string }>
+  builtinCancel(): Promise<void>
+  onBuiltinProgress(cb: (p: ModelDownloadProgress) => void): () => void
 }

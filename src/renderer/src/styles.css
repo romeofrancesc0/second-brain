@@ -2101,6 +2101,81 @@ input[type='range']:focus-visible::-webkit-slider-thumb {
   margin: 8px 0 14px;
 }
 
+.agent-empty .btn.primary {
+  margin: 4px 0 2px;
+}
+
+.agent-empty .error,
+.agent-empty .dl-note {
+  margin: 8px 0 0;
+}
+
+.dl {
+  margin: 6px 0 2px;
+}
+
+.dl-bar {
+  height: 4px;
+  border-radius: 4px;
+  background: rgb(var(--ink) / 0.1);
+  overflow: hidden;
+}
+
+.dl-bar i {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  transition: width 0.25s;
+}
+
+.dl-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dl-meta .link-btn {
+  margin-left: auto;
+}
+
+.agent-empty details.adv {
+  margin-top: 18px;
+  font-size: 12.5px;
+}
+
+.agent-empty details.adv summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.builtin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.builtin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.builtin-row > span:first-child {
+  margin-right: auto;
+}
+
+.builtin-row em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--accent);
+}
+
 .agent-empty .row {
   display: flex;
   gap: 8px;
