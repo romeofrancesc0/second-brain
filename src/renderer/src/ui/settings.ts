@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type AppSettings, type Tone, type ViewMode } from '@shared/types'
+import { DEFAULT_SETTINGS, type AppSettings, type FrameRate, type Tone, type ViewMode } from '@shared/types'
 import { VIEWS, isLight } from '../graph/views'
 import { icons } from './icons'
 
@@ -10,7 +10,7 @@ type Section = 'theme' | 'graph' | 'motion' | 'vault' | 'agent' | 'keys'
 const SECTIONS: { id: Section; label: string; icon: string; lead: string }[] = [
   { id: 'theme', label: 'Tema', icon: icons.palette, lead: 'Scegli come disegnare il grafo e personalizza l’aspetto di ogni vista.' },
   { id: 'graph', label: 'Grafo', icon: icons.graph, lead: 'Cosa mostrare nella rete e quanto devono risaltare neuroni e sinapsi.' },
-  { id: 'motion', label: 'Navigazione', icon: icons.move, lead: 'Movimento della camera e aiuti a schermo.' },
+  { id: 'motion', label: 'Navigazione', icon: icons.move, lead: 'Movimento della camera, fluidità della vista e aiuti a schermo.' },
   { id: 'vault', label: 'Vault', icon: icons.vault, lead: 'Il vault Obsidian aperto e il suo layout.' },
   { id: 'agent', label: 'Agente AI', icon: icons.agent, lead: 'Modello locale, ricerca semantica e accesso MCP.' },
   { id: 'keys', label: 'Scorciatoie', icon: icons.keyboard, lead: 'Tutti i comandi da tastiera.' }
@@ -71,9 +71,11 @@ const CONTENT_TOGGLES: ToggleDef[] = [
 ]
 
 const MOTION_TOGGLES: ToggleDef[] = [
-  { key: 'autoRotate', label: 'Rotazione automatica', hint: 'Dopo qualche secondo di inattività (solo nelle viste 3D)' },
+  { key: 'autoRotate', label: 'Rotazione automatica', hint: 'Un giro lento all’apertura dell’app (solo nelle viste 3D)' },
   { key: 'hints', label: 'Suggerimenti dei comandi', hint: 'La riga di aiuto in basso all’avvio' }
 ]
+
+const FRAME_RATES: FrameRate[] = [24, 30, 60, 120]
 
 const ACCENTS: { color: string; name: string }[] = [
   { color: '#8796d6', name: 'Indaco' },
@@ -236,6 +238,13 @@ export class SettingsDialog {
       this.paint()
       return
     }
+    const fps = t.closest<HTMLElement>('[data-fps]')?.dataset.fps
+    if (fps) {
+      this.settings.fps = Number(fps) as FrameRate
+      this.emit(false)
+      this.paint()
+      return
+    }
     const accent = t.closest<HTMLElement>('[data-accent]')?.dataset.accent
     if (accent) {
       this.settings.accent = accent
@@ -337,7 +346,20 @@ export class SettingsDialog {
             )
           )}`
       case 'motion':
-        return group('Camera e aiuti', card(MOTION_TOGGLES.map((t) => toggleRow(t, s)).join('')))
+        return `
+          ${group('Camera e aiuti', card(MOTION_TOGGLES.map((t) => toggleRow(t, s)).join('')))}
+          ${group(
+            'Fluidità',
+            card(
+              row(
+                'Fotogrammi al secondo',
+                'Mentre muovi il grafo; da fermo scende a 1 al secondo',
+                `<div class="segmented">${FRAME_RATES.map(
+                  (f) => `<button data-fps="${f}" class="${s.fps === f ? 'on' : ''}"><span>${f}</span></button>`
+                ).join('')}</div>`
+              )
+            )
+          )}`
       case 'vault': {
         const v = this.vault
         return `

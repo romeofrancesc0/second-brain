@@ -43,6 +43,15 @@ export const BACKGROUND = '#090b11'
 const SEG = 6
 const VPL = (SEG + 1) * 2
 const HAZE_BLOBS = 9
+/** Frame rate while nothing moves: the scene stays the same, only the slow shader effects advance. */
+const REST_FPS = 1
+/** How long the loop keeps the full frame rate after the last input or animation. */
+const LINGER_MS = 1800
+/** Auto-rotation: one slow turn when the app opens, braking evenly over the last BRAKE radians (about 3 s). */
+const AUTO_ROTATE_SPEED = 0.25
+const AUTO_ROTATE_BRAKE = 0.04
+/** Damping of the orbit controls per frame at 60 fps (scaled to the actual frame time). */
+const DAMPING = 0.07
 
 export interface BrainGraph {
   nodes: GraphNode[]
@@ -143,8 +152,22 @@ export class Brain {
   private settings: AppSettings
   private screen = new Float32Array(0) // x, y, depth, radiusPx per node
   private projMatrix = new THREE.Matrix4()
-  private lastInteraction = performance.now()
+  /** Radians left of the single turn made when the app opens; any input cancels it for good. */
+  private openingTurn = Math.PI * 2
+  /** Clock of the shader effects: stands still in the hologram while the window has no focus. */
+  private effectTime = 0
   private boundsRadius = 400
+
+  // render loop: full frame rate while something moves, REST_FPS otherwise, nothing while hidden
+  private fps = 60
+  /** Animations and app events keep the full rate until then (only while the window has focus). */
+  private activeUntil = 0
+  /** Direct input on the canvas keeps the full rate until then, even without focus. */
+  private inputUntil = 0
+  private focused = document.hasFocus()
+  private lastFrameAt = 0
+  private rafId = 0
+  private restTimer = 0
 
   constructor(
     private container: HTMLElement,
@@ -163,17 +186,18 @@ export class Brain {
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = true
-    this.controls.dampingFactor = 0.07
+    this.controls.dampingFactor = DAMPING
     this.controls.rotateSpeed = 0.55
     this.controls.zoomSpeed = 1.0
     this.controls.panSpeed = 0.8
     this.controls.zoomToCursor = true
     this.controls.minDistance = 4
     this.controls.maxDistance = 9000
-    this.controls.autoRotateSpeed = 0.25
+    this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED
     this.controls.addEventListener('start', () => {
       this.flight = null
-      this.lastInteraction = performance.now()
+      this.openingTurn = 0
+      this.requestActive(LINGER_MS, true)
     })
 
     this.scene.add(this.root)
@@ -342,11 +366,78 @@ export class Brain {
     this.worker.onmessage = (e: MessageEvent<LayoutOut>) => this.onWorker(e.data)
 
     this.bindEvents()
+    this.bindLoopEvents()
     new ResizeObserver(() => this.resize()).observe(container)
     this.resize()
     this.applySettings(settings)
     this.timer.connect(document)
-    this.renderer.setAnimationLoop(() => this.frame())
+    this.requestActive()
+  }
+
+  /* ------------------------------------------------------------ render loop */
+
+  /**
+   * Keeps the loop at the full frame rate for `ms` (from the next frame on, so it starts at once).
+   * Without window focus only `input` (the user acting on the canvas) does; the rest waits at REST_FPS.
+   */
+  requestActive(ms = LINGER_MS, input = false): void {
+    const until = performance.now() + ms
+    if (input) this.inputUntil = Math.max(this.inputUntil, until)
+    this.activeUntil = Math.max(this.activeUntil, until)
+    this.invalidate()
+  }
+
+  /** Draws a new frame as soon as possible, even while resting. */
+  invalidate(): void {
+    if (document.hidden || this.rafId) return
+    clearTimeout(this.restTimer)
+    this.restTimer = 0
+    this.rafId = requestAnimationFrame(this.tick)
+  }
+
+  private get active(): boolean {
+    const now = performance.now()
+    return now < this.inputUntil || (this.focused && now < this.activeUntil)
+  }
+
+  private tick = (): void => {
+    this.rafId = 0
+    if (document.hidden) return
+    const now = performance.now()
+    const interval = 1000 / this.fps
+    // the display may refresh faster than the chosen rate: skip vsyncs until the next frame is due
+    if (now - this.lastFrameAt < interval - 4) {
+      this.rafId = requestAnimationFrame(this.tick)
+      return
+    }
+    // keep a steady cadence (e.g. 24 fps on a 60 Hz display), restarting it after a pause
+    this.lastFrameAt = now - this.lastFrameAt > interval * 2 ? now : this.lastFrameAt + interval
+    this.frame()
+    this.scheduleNext()
+  }
+
+  private scheduleNext(): void {
+    if (document.hidden || this.rafId || this.restTimer) return
+    if (this.active) this.rafId = requestAnimationFrame(this.tick)
+    else this.restTimer = window.setTimeout(() => this.invalidate(), 1000 / REST_FPS)
+  }
+
+  private bindLoopEvents(): void {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // hidden or minimised: stop drawing altogether
+        cancelAnimationFrame(this.rafId)
+        clearTimeout(this.restTimer)
+        this.rafId = this.restTimer = 0
+      } else this.requestActive()
+    })
+    window.addEventListener('focus', () => {
+      this.focused = true
+      this.requestActive()
+    })
+    window.addEventListener('blur', () => {
+      this.focused = false
+    })
   }
 
   /* ------------------------------------------------------------ public api */
@@ -446,6 +537,7 @@ export class Brain {
     }
     this.layoutRunning = true
     this.worker.postMessage(msg)
+    this.requestActive()
     this.rebuildHaze()
 
     if (intro) {
@@ -477,7 +569,7 @@ export class Brain {
   zoom(factor: number): void {
     const offset = this.camera.position.clone().sub(this.controls.target)
     const dist = THREE.MathUtils.clamp(offset.length() * factor, this.controls.minDistance, this.controls.maxDistance)
-    this.lastInteraction = performance.now()
+    this.openingTurn = 0
     this.flyTo(this.controls.target.clone(), offset.setLength(dist), 380)
   }
 
@@ -501,6 +593,7 @@ export class Brain {
 
   select(id: string | null, fly = true): void {
     const idx = id ? (this.indexById.get(id) ?? -1) : -1
+    if (idx >= 0) this.openingTurn = 0
     this.selected = idx
     this.refreshStates()
     if (idx >= 0 && fly) this.flyToNode(idx)
@@ -515,6 +608,7 @@ export class Brain {
   /** Highlights the neurons the agent is working on; optionally flies the camera to frame them. */
   setAgentFocus(ids: string[], fly: boolean): void {
     this.agentFocus = new Set(ids.map((id) => this.indexById.get(id)).filter((i): i is number => i !== undefined))
+    if (fly && this.agentFocus.size) this.openingTurn = 0
     this.refreshStates()
     if (!fly || !this.agentFocus.size || this.selected >= 0) return
     const pts = [...this.agentFocus].map((i) => this.nodeWorld(i))
@@ -627,6 +721,7 @@ export class Brain {
 
   applySettings(s: AppSettings): void {
     this.settings = s
+    this.fps = s.fps ?? 60
     const light = isLight(s)
     if (s.view !== this.view || light !== this.light) this.setLook(s.view, light)
     const u = this.uniforms
@@ -662,6 +757,7 @@ export class Brain {
     this.synapseMat.uniforms.uPulses.value = s.pulses ? 1 : 0
     u.uScale.value = this.nodeScale()
     this.labels.setEnabled(s.labels)
+    this.invalidate()
   }
 
   /** Switches shaders, blending and the extra layers (haze, dust, grid, post-processing) to another view. */
@@ -730,6 +826,7 @@ export class Brain {
   }
 
   resetView(): void {
+    this.openingTurn = 0
     this.select(null)
     this.flyTo(this.homeTarget(), this.homeOffset(), 1600)
   }
@@ -753,7 +850,8 @@ export class Brain {
   }
 
   dispose(): void {
-    this.renderer.setAnimationLoop(null)
+    cancelAnimationFrame(this.rafId)
+    clearTimeout(this.restTimer)
     this.worker.terminate()
     this.renderer.dispose()
   }
@@ -891,6 +989,7 @@ export class Brain {
     lv.needsUpdate = true
     if (this.selected >= 0 && !this.visible[this.selected]) this.select(null, false)
     this.rebuildHaze()
+    this.invalidate()
   }
 
   private refreshStates(): void {
@@ -933,6 +1032,8 @@ export class Brain {
     ns.needsUpdate = true
     ls.needsUpdate = true
     this.dimTarget = active ? 1 : 0
+    // a hover only needs one new frame; dimming the rest of the network animates (see frame)
+    this.invalidate()
   }
 
   /* ----------------------------------------------------------------- camera */
@@ -946,6 +1047,7 @@ export class Brain {
       t0: performance.now(),
       duration
     }
+    this.requestActive()
   }
 
   private nodeWorld(i: number, out = new THREE.Vector3()): THREE.Vector3 {
@@ -972,8 +1074,12 @@ export class Brain {
       this.pointer.x = e.clientX - r.left
       this.pointer.y = e.clientY - r.top
       this.pointer.inside = true
-      if (this.pointer.down && Math.hypot(e.clientX - this.pointer.downX, e.clientY - this.pointer.downY) > 5) {
-        this.pointer.moved = true
+      if (this.pointer.down) {
+        if (Math.hypot(e.clientX - this.pointer.downX, e.clientY - this.pointer.downY) > 5) this.pointer.moved = true
+        this.requestActive(LINGER_MS, true)
+      } else {
+        // the projected neurons are current while the camera is still: no need to wake the loop to hover
+        this.setHovered(this.pick(this.pointer.x, this.pointer.y))
       }
     })
     el.addEventListener('pointerleave', () => {
@@ -981,6 +1087,7 @@ export class Brain {
       this.setHovered(-1)
     })
     el.addEventListener('pointerdown', (e) => {
+      this.requestActive(LINGER_MS, true)
       this.pointer.down = true
       this.pointer.moved = false
       this.pointer.downX = e.clientX
@@ -996,7 +1103,8 @@ export class Brain {
     })
     el.addEventListener('wheel', () => {
       this.flight = null
-      this.lastInteraction = performance.now()
+      this.openingTurn = 0
+      this.requestActive(LINGER_MS, true)
     })
 
     window.addEventListener('keydown', (e) => {
@@ -1005,7 +1113,8 @@ export class Brain {
       if (['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(k)) {
         this.keys.add(k)
         this.flight = null
-        this.lastInteraction = performance.now()
+        this.openingTurn = 0
+        this.requestActive(LINGER_MS, true)
       }
     })
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()))
@@ -1055,6 +1164,12 @@ export class Brain {
     this.film.uniforms.uHeight.value = h
     this.camera.aspect = w / h
     this.camera.updateProjectionMatrix()
+    // resizing clears the canvas: draw again before it is shown, then keep going while the window is dragged
+    if (!document.hidden && this.lastFrameAt) {
+      this.frame()
+      this.lastFrameAt = performance.now()
+    }
+    this.requestActive()
   }
 
   /* ---------------------------------------------------------------- worker */
@@ -1064,6 +1179,7 @@ export class Brain {
     this.layoutPositions.set(msg.positions)
     if (msg.type === 'done' || !this.brainFit) this.brainFit = fitBrain(this.layoutPositions, this.nodes.length)
     this.updateDisplay()
+    this.requestActive()
     if (msg.type === 'done') {
       this.layoutRunning = false
       this.boundsRadius = this.frameRadius()
@@ -1079,8 +1195,13 @@ export class Brain {
 
   private frame(): void {
     this.timer.update()
-    const dt = Math.min(this.timer.getDelta(), 0.1)
-    const time = this.timer.getElapsed()
+    // after a pause (rest, hidden window) restart smoothly instead of catching up in one jump
+    const delta = Math.min(this.timer.getDelta(), 1.1)
+    const dt = Math.min(delta, 2 / this.fps)
+    // the hologram effects stop altogether in the background and pick up where they were
+    if (this.focused || this.view !== 'hologram') this.effectTime += delta
+    const time = this.effectTime
+    const flying = !!this.flight || this.keys.size > 0
     this.neuronMat.uniforms.uTime.value = time
 
     if (this.positionsDirty) {
@@ -1118,13 +1239,23 @@ export class Brain {
       }
     }
 
-    const idle = performance.now() - this.lastInteraction > 4000
-    this.controls.autoRotate = this.settings.autoRotate && this.selected < 0 && !this.flight && idle
-    this.controls.update(dt)
+    // only while the window has focus: in the background the loop rests
+    this.controls.autoRotate =
+      this.settings.autoRotate && this.openingTurn > 0 && this.focused && this.selected < 0 && !this.flight && !this.layoutRunning && this.nodes.length > 0
+    if (this.controls.autoRotate) {
+      // brakes gently at the end of the turn instead of stopping dead (constant deceleration: speed ∝ √distance left)
+      this.controls.autoRotateSpeed = AUTO_ROTATE_SPEED * THREE.MathUtils.clamp(Math.sqrt(this.openingTurn / AUTO_ROTATE_BRAKE), 0.03, 1)
+      // same angle OrbitControls turns by in update(dt)
+      this.openingTurn = Math.max(this.openingTurn - ((2 * Math.PI) / 60) * this.controls.autoRotateSpeed * dt, 0)
+    }
+    // the same inertia in seconds whatever the frame rate
+    this.controls.dampingFactor = 1 - Math.pow(1 - DAMPING, dt * 60)
+    const orbiting = this.controls.update(dt)
 
     // hologram: the network flows into the brain (and back out when leaving the view)
     const warpTarget = this.view === 'hologram' ? 1 : 0
-    if (this.warp !== warpTarget) {
+    const warping = this.warp !== warpTarget
+    if (warping) {
       this.warp = THREE.MathUtils.clamp(this.warp + Math.sign(warpTarget - this.warp) * dt / 1.4, 0, 1)
       this.updateDisplay()
       this.boundsRadius = this.frameRadius()
@@ -1157,7 +1288,8 @@ export class Brain {
     u.uFogNear.value = camDist * 1.5 + this.boundsRadius * 0.15
     u.uFogFar.value = camDist * 4 + this.boundsRadius * 1.6
     u.uPixelScale.value = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2)) / this.container.clientHeight
-    u.uDim.value += (this.dimTarget - u.uDim.value) * Math.min(1, dt * 5)
+    const dimming = Math.abs(this.dimTarget - u.uDim.value) > 0.002
+    u.uDim.value = dimming ? u.uDim.value + (this.dimTarget - u.uDim.value) * Math.min(1, dt * 5) : this.dimTarget
     this.synapseMat.uniforms.uWidth.value = 0.14 * this.settings.nodeScale
 
     // a touch of bloom on highlights only, weaker when inside a dense cluster
@@ -1180,6 +1312,13 @@ export class Brain {
     this.labels.update(this, this.screen, this.visible, this.radii)
 
     this.composer.render(dt)
+
+    // everything that moves the scene keeps the full frame rate (other shader effects alone do not)
+    // the hologram is always animated while the window has focus
+    const holo = this.view === 'hologram' && this.focused
+    if (flying || orbiting || warping || dimming || holo || this.pointer.down || this.layoutRunning || this.controls.autoRotate) {
+      this.activeUntil = Math.max(this.activeUntil, performance.now() + LINGER_MS)
+    }
   }
 
   private projectNodes(): void {
