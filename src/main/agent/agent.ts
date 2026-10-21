@@ -13,6 +13,8 @@ export interface AgentHost {
   context(): Omit<ToolContext, 'approve'> | null
   rules(): Promise<string>
   readOnly?: boolean
+  /** Eco mode, read live: the agent only searches and reads notes, and never looks at images. */
+  eco?(): boolean
 }
 
 /** One conversation with the local model, with tool use, approvals for writes and streaming events. */
@@ -28,6 +30,20 @@ export class AgentSession {
   reset(): void {
     this.stop()
     this.history = []
+  }
+
+  private eco(): boolean {
+    return !!this.host.eco?.()
+  }
+
+  private readOnly(): boolean {
+    return !!this.host.readOnly || this.eco()
+  }
+
+  /** Eco was switched on: refuse the writes waiting for approval (later ones are blocked in runTool). */
+  revokeWrites(): void {
+    for (const resolve of this.approvals.values()) resolve(false)
+    this.approvals.clear()
   }
 
   stop(): void {
@@ -54,15 +70,15 @@ export class AgentSession {
     const signal = this.abort.signal
     const run = ++this.runs
     const client = createClient(s, base.dataDir)
-    const readOnly = !!this.host.readOnly
-    if (!this.history.length) {
-      this.history.push({ role: 'system', content: buildSystemPrompt(base.knowledge(), await this.host.rules(), readOnly) })
-    }
+    // the system prompt follows the mode of each request: a conversation can go from Basic to Eco and back
+    const prompt: ChatMessage = { role: 'system', content: buildSystemPrompt(base.knowledge(), await this.host.rules(), this.eco() && !this.host.readOnly ? 'eco' : this.readOnly()) }
+    if (this.history[0]?.role === 'system') this.history[0] = prompt
+    else this.history.unshift(prompt)
     this.history.push({ role: 'user', content: text })
 
     let useTools = true
     let think = s.think
-    const vision = (await client.canSee?.(s.model).catch(() => false)) ?? false
+    const canSee = !this.eco() && ((await client.canSee?.(s.model).catch(() => false)) ?? false)
     const seen = new Set<string>()
     try {
       for (let step = 0; step < MAX_STEPS; step++) {
@@ -79,7 +95,9 @@ export class AgentSession {
           res = await client.chat({
             model: s.model,
             messages: this.history,
-            tools: useTools ? toolSpecs(readOnly, vision) : undefined,
+            // read at every step: switching to Eco mid-answer removes the write and image tools right away
+            tools: useTools ? toolSpecs(this.readOnly(), canSee && !this.eco()) : undefined,
+            vision: !this.eco(),
             temperature: s.temperature,
             numCtx: s.numCtx,
             think,
@@ -196,7 +214,9 @@ export class AgentSession {
       return { content: `Errore: ${message}`, summary: message, ids: [] }
     }
     if (!def) return fail(`strumento sconosciuto "${call.name}". Disponibili: ${TOOLS.map((t) => t.name).join(', ')}`)
+    if (def.write && this.eco()) return fail('in modalità Eco l’agente è in sola lettura')
     if (def.write && this.host.readOnly) return fail('il vault è in sola lettura')
+    if (def.vision && this.eco()) return fail('in modalità Eco l’agente non guarda le immagini')
 
     const ctx: ToolContext = {
       ...base,
@@ -223,6 +243,11 @@ export class AgentSession {
     }
     try {
       const r = await def.run(call.args, ctx)
+      // refused because Eco was switched on while it waited, not by the user: say so to the model and in the UI
+      if (r.rejected && this.eco()) {
+        r.content = 'Modifica non fatta: l’app è passata in modalità Eco, dove l’agente è in sola lettura. Dillo all’utente.'
+        r.summary = 'Non fatta: modalità Eco'
+      }
       ui.status = r.rejected ? 'rejected' : 'done'
       ui.summary = r.summary
       ui.ids = r.ids

@@ -2673,3 +2673,142 @@ pre.mcp-config {
 :root[data-look='minimal'] .legend li .bar b {
   filter: saturate(1.9);
 }
+
+/* ---------------------------------------------------------------- modes */
+
+.mode-trigger.eco {
+  color: var(--eco);
+  border-color: rgb(var(--eco-rgb) / 0.4);
+  background: rgb(var(--eco-rgb) / 0.1);
+}
+
+.mode-trigger.eco:hover,
+.mode-trigger.eco.active {
+  background: rgb(var(--eco-rgb) / 0.16);
+}
+
+:root {
+  --eco-rgb: 112 184 132;
+  --eco: rgb(var(--eco-rgb));
+}
+
+.mode-menu {
+  position: fixed;
+  z-index: 40;
+  width: 340px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mode-title {
+  padding: 6px 10px 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mode-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  text-align: left;
+  color: var(--text-2);
+}
+
+.mode-item:hover {
+  background: rgb(var(--ink) / 0.06);
+}
+
+.mode-item.on {
+  background: rgb(var(--ink) / 0.08);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+.mode-ic {
+  flex: none;
+  margin-top: 1px;
+}
+
+.mode-item[data-mode='eco'] .mode-ic {
+  color: var(--eco);
+}
+
+.mode-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mode-text small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mode-text ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.mode-check {
+  flex: none;
+  opacity: 0;
+  color: var(--brand);
+}
+
+.mode-item.on .mode-check {
+  opacity: 1;
+}
+
+.agent-eco {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 14px 6px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+  background: rgb(var(--eco-rgb) / 0.1);
+  border: 1px solid rgb(var(--eco-rgb) / 0.28);
+}
+
+.agent-eco svg,
+.eco-note svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--eco);
+}
+
+.eco-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-2);
+  background: rgb(var(--eco-rgb) / 0.1);
+  border: 1px solid rgb(var(--eco-rgb) / 0.28);
+}
+
+/* in Eco the agent cannot change the vault: no undo for earlier changes */
+.agent-panel.eco [data-undo] {
+  display: none;
+}

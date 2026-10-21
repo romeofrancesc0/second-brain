@@ -1,6 +1,6 @@
 import { app, ipcMain, shell, type BrowserWindow } from 'electron'
 import { join } from 'node:path'
-import { DEFAULT_AI, type AgentEvent, type AiSettings, type AiStatus, type IndexStatus, type McpInfo, type ModelDownloadProgress } from '@shared/types'
+import { DEFAULT_AI, type AgentEvent, type AiSettings, type AppMode, type AiStatus, type IndexStatus, type McpInfo, type ModelDownloadProgress } from '@shared/types'
 import { AgentSession } from './agent/agent'
 import { disposeBuiltin } from './agent/builtin'
 import { EmbeddingIndex } from './agent/embeddings'
@@ -18,13 +18,19 @@ export interface AgentDeps {
   rescan(): Promise<void>
   loadAi(): Promise<Partial<AiSettings> | undefined>
   saveAi(s: AiSettings): Promise<void>
+  /** The saved app mode: in Eco the agent only reads notes and never looks at images. */
+  loadMode(): Promise<AppMode>
 }
 
 /** Wires the local-model agent (chat, tools, semantic index, MCP info) to the renderer. */
-export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): void } {
+export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): void; setMode(m: AppMode): void } {
   const dataDir = app.getPath('userData')
   let settings: AiSettings = { ...DEFAULT_AI }
-  const ready = deps.loadAi().then((s) => (settings = { ...DEFAULT_AI, ...s }))
+  let mode: AppMode = 'basic'
+  /** A mode set by the user before the saved one was read wins over it. */
+  let modeChosen = false
+  const eco = (): boolean => mode === 'eco'
+  const ready = Promise.all([deps.loadAi().then((s) => (settings = { ...DEFAULT_AI, ...s })), deps.loadMode().then((m) => (modeChosen ? mode : (mode = m)))])
 
   let index: EmbeddingIndex | null = null
   let indexKey = ''
@@ -85,6 +91,7 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
   const session = new AgentSession({
     emit,
     settings: () => settings,
+    eco,
     rules: async () => {
       const vault = deps.vault()
       return vault ? readVaultRules(vault) : ''
@@ -140,6 +147,7 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
   ipcMain.handle('agent:reset', () => session.reset())
   ipcMain.handle('agent:approve', (_e, callId: string, ok: boolean) => session.approve(callId, ok))
   ipcMain.handle('agent:undo', async (_e, changeId: string) => {
+    if (eco()) return { ok: false, message: 'In modalità Eco l’agente non modifica il vault: passa a Basic per annullare.' }
     const vault = deps.vault()
     if (!vault) return { ok: false, message: 'Nessun vault aperto' }
     try {
@@ -156,7 +164,10 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
     pushIndexStatus()
     return indexStatus
   })
-  ipcMain.handle('index:build', () => buildIndex())
+  ipcMain.handle('index:build', async () => {
+    await ready
+    if (!eco()) await buildIndex()
+  })
   let download: AbortController | null = null
   ipcMain.handle('builtin:models', () => modelInfo(dataDir))
   ipcMain.handle('builtin:download', async (_e, id: string) => {
@@ -191,12 +202,20 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
   })
 
   return {
+    setMode: (m) => {
+      mode = m
+      modeChosen = true
+      if (!eco()) return
+      // Eco from now on: pending approvals are refused and a running index build stops
+      session.revokeWrites()
+      indexing?.abort()
+    },
     onScan: (k) => {
       k.embeddings = index
       void ensureIndex().then(() => {
         // keep the semantic index fresh when a few notes change (e.g. edits made by the agent)
         const stale = index ? index.stale(k.notes.values()).length : 0
-        if (index && !indexing && stale > 0 && stale <= 50) void buildIndex()
+        if (index && !indexing && !eco() && stale > 0 && stale <= 50) void buildIndex()
       })
     }
   }

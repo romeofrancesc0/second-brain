@@ -18,7 +18,8 @@ export async function readVaultRules(vaultPath: string): Promise<string> {
   return ''
 }
 
-export function buildSystemPrompt(k: VaultKnowledge, rules: string, readOnly: boolean): string {
+/** readOnly 'eco': read-only because the app is in Eco mode, which the user can leave. */
+export function buildSystemPrompt(k: VaultKnowledge, rules: string, readOnly: boolean | 'eco'): string {
   const notes = [...k.nodes.values()].filter((n) => n.kind === 'note' || n.kind === 'moc').length
   const regions = k
     .courses()
@@ -36,7 +37,9 @@ Come lavori:
 - Cita sempre le note che usi scrivendo il titolo tra doppie parentesi quadre, ad esempio [[Trasformata Z]]: nell'app diventano link cliccabili e i neuroni si illuminano.
 - Non inventare titoli di note: usa solo titoli che hai visto nei risultati degli strumenti.
 ${
-  readOnly
+  readOnly === 'eco'
+    ? "- L'app è in modalità Eco: puoi solo cercare e leggere le note, non puoi crearle, modificarle o collegarle e non puoi guardare immagini. Se l'utente chiede una di queste cose, digli chiaramente che in modalità Eco non puoi farlo e che può passare alla modalità Basic dal pulsante della modalità in alto a destra; non dire mai di averlo fatto."
+    : readOnly
     ? '- In questa sessione puoi solo leggere il vault, non modificarlo.'
     : `- Puoi modificare il vault (create_note, update_note, append_to_note, link_notes) quando l'utente lo chiede, o proporre modifiche e farle solo se l'utente è d'accordo. Ogni modifica viene mostrata all'utente, che la approva o la rifiuta.
 - Prima di modificare una nota leggila con read_note. Prima di crearne una nuova cerca se il concetto esiste già: in quel caso aggiorna quella esistente.

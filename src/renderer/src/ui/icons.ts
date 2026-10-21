@@ -42,5 +42,7 @@ export const icons = {
   zoomOut: svg('<path d="M5 12h14"/>'),
   fit: svg('<path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>'),
   reset: svg('<path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/>'),
-  download: svg('<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>')
+  download: svg('<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>'),
+  bolt: svg('<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>'),
+  leaf: svg('<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19l7-7"/>')
 }

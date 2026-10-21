@@ -45,6 +45,10 @@ const VPL = (SEG + 1) * 2
 const HAZE_BLOBS = 9
 /** Frame rate while nothing moves: the scene stays the same, only the slow shader effects advance. */
 const REST_FPS = 1
+/** Eco mode: highest frame rate, whatever the settings say. */
+const ECO_FPS = 30
+/** Eco mode: share of the atmosphere (dust and glow of the clusters) kept; the volumetric haze is off. */
+const ECO_ATMOSPHERE = 0.5
 /** How long the loop keeps the full frame rate after the last input or animation. */
 const LINGER_MS = 1800
 /** Auto-rotation: one slow turn when the app opens, braking evenly over the last BRAKE radians (about 3 s). */
@@ -160,6 +164,8 @@ export class Brain {
 
   // render loop: full frame rate while something moves, REST_FPS otherwise, nothing while hidden
   private fps = 60
+  /** Eco mode: lighter rendering applied on top of the settings, which stay as they are. */
+  private eco = false
   /** Animations and app events keep the full rate until then (only while the window has focus). */
   private activeUntil = 0
   /** Direct input on the canvas keeps the full rate until then, even without focus. */
@@ -719,18 +725,31 @@ export class Brain {
     this.gridMat.uniforms.uCell.value = r / 7
   }
 
+  /**
+   * Eco mode: at most ECO_FPS, normal instead of Retina resolution (a quarter of the pixels), no bloom,
+   * film pass (grain, scanlines, fringing) or depth of field, less atmosphere. The settings are untouched.
+   */
+  setEco(on: boolean): void {
+    if (on === this.eco) return
+    this.eco = on
+    this.renderer.setPixelRatio(on ? 1 : Math.min(window.devicePixelRatio, 2))
+    this.dustMat.uniforms.uPixelRatio.value = this.renderer.getPixelRatio()
+    this.resize()
+    this.applySettings(this.settings)
+  }
+
   applySettings(s: AppSettings): void {
     this.settings = s
-    this.fps = s.fps ?? 60
+    this.fps = this.eco ? Math.min(s.fps ?? 60, ECO_FPS) : (s.fps ?? 60)
     const light = isLight(s)
     if (s.view !== this.view || light !== this.light) this.setLook(s.view, light)
     const u = this.uniforms
-    const atmos = s.atmosphere ?? 1
+    const atmos = (s.atmosphere ?? 1) * (this.eco ? ECO_ATMOSPHERE : 1)
     if (s.view === 'nebula') {
       this.hazeMat.uniforms.uHaze.value = atmos * 1.1
       this.dustMat.uniforms.uDust.value = atmos
       u.uAtmos.value = atmos
-      u.uDof.value = s.dof ?? 0.7
+      u.uDof.value = this.eco ? 0 : (s.dof ?? 0.7)
       this.film.uniforms.uGrain.value = (s.grain ?? 0.5) * 0.06
       this.film.uniforms.uVignette.value = 0.35
       this.film.uniforms.uScan.value = 0
@@ -740,7 +759,7 @@ export class Brain {
       const k = s.interference ?? 0.6
       this.dustMat.uniforms.uDust.value = 0.35
       u.uAtmos.value = 0
-      u.uDof.value = 0.2
+      u.uDof.value = this.eco ? 0 : 0.2
       u.uInterf.value = k
       this.film.uniforms.uGrain.value = 0.012 + k * 0.02
       this.film.uniforms.uVignette.value = 0.45
@@ -757,6 +776,10 @@ export class Brain {
     this.synapseMat.uniforms.uPulses.value = s.pulses ? 1 : 0
     u.uScale.value = this.nodeScale()
     this.labels.setEnabled(s.labels)
+    // full-screen passes: the most expensive part of a frame after the network itself
+    this.bloom.enabled = this.view !== 'minimal' && !this.eco
+    this.film.enabled = this.view !== 'minimal' && !this.eco
+    if (this.hazeMesh) this.hazeMesh.visible = this.view === 'nebula' && !this.eco
     this.invalidate()
   }
 
