@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { promises as fs } from 'node:fs'
 import { basename, extname, join, posix, relative, sep, isAbsolute } from 'node:path'
 import { parse as parseYaml } from 'yaml'
@@ -282,7 +283,7 @@ export async function scanVault(vaultPath: string): Promise<VaultScan> {
   for (const node of nodes.values()) {
     if (node.group) continue
     const m = votes.get(node.id)
-    node.group = m ? [...m.entries()].sort((a, b) => b[1] - a[1])[0][0] : node.kind === 'unresolved' ? 'Non risolti' : 'Fonti'
+    node.group = m ? [...m.entries()].sort((a, b) => b[1] - a[1])[0][0] : node.kind === 'unresolved' ? t('Non risolti') : t('Fonti')
   }
 
   return {
@@ -316,6 +317,6 @@ export function resolveNoteLinks(resolver: Resolver, id: string, markdown: strin
 export function safeVaultPath(vaultPath: string, id: string): string {
   const abs = join(vaultPath, ...id.split('/'))
   const rel = relative(vaultPath, abs)
-  if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('Percorso fuori dal vault')
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error(t('Percorso fuori dal vault'))
   return abs
 }

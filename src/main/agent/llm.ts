@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import type { AiSettings } from '@shared/types'
 import { secondBrainDataDir } from '../platform'
 import { BuiltinClient } from './builtin'
@@ -79,7 +80,7 @@ async function request(url: string, init: RequestInit): Promise<Response> {
     res = await fetch(url, init)
   } catch (err) {
     if ((err as Error).name === 'AbortError') throw err
-    throw new ModelError('connection', `Impossibile raggiungere il server del modello (${url}). È avviato?`)
+    throw new ModelError('connection', t('Impossibile raggiungere il server del modello ({url}). È avviato?', { url }))
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '')
@@ -93,7 +94,7 @@ async function request(url: string, init: RequestInit): Promise<Response> {
     if (/does not support tools|tool.*not supported|tools? (are|is) not supported/i.test(message)) throw new ModelError('no-tools', message)
     if (/does not support think/i.test(message)) throw new ModelError('no-think', message)
     if (res.status === 404 && /model/i.test(message)) throw new ModelError('no-model', message)
-    throw new ModelError('http', `Errore ${res.status}: ${message || res.statusText}`)
+    throw new ModelError('http', `${t('Errore')} ${res.status}: ${message || res.statusText}`)
   }
   return res
 }
@@ -258,7 +259,7 @@ class OllamaClient implements ChatClient {
       signal
     })
     const j = (await res.json()) as { embeddings?: number[][] }
-    if (!j.embeddings) throw new ModelError('http', 'Risposta di embedding non valida')
+    if (!j.embeddings) throw new ModelError('http', t('Risposta di embedding non valida'))
     return j.embeddings
   }
 }
@@ -352,7 +353,7 @@ export class OpenAICompatClient implements ChatClient {
       } catch {
         continue
       }
-      if (j.error) throw new ModelError('http', j.error.message ?? 'Errore del modello')
+      if (j.error) throw new ModelError('http', j.error.message ?? t('Errore del modello'))
       const d = j.choices?.[0]?.delta
       if (!d) continue
       const r = d.reasoning_content ?? d.reasoning
@@ -382,7 +383,7 @@ export class OpenAICompatClient implements ChatClient {
       signal
     })
     const j = (await res.json()) as { data?: { embedding: number[]; index: number }[] }
-    if (!j.data) throw new ModelError('http', 'Risposta di embedding non valida')
+    if (!j.data) throw new ModelError('http', t('Risposta di embedding non valida'))
     return [...j.data].sort((a, b) => a.index - b.index).map((d) => d.embedding)
   }
 }

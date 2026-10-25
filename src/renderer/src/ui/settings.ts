@@ -1,3 +1,4 @@
+import { LANGS, getLang, localeTag, t, type Lang } from '@shared/i18n'
 import { DEFAULT_SETTINGS, type AppSettings, type FrameRate, type Tone, type ViewMode } from '@shared/types'
 import { VIEWS, isLight } from '../graph/views'
 import { icons } from './icons'
@@ -149,14 +150,14 @@ export class SettingsDialog {
     private settings: AppSettings
   ) {
     el.innerHTML = `
-      <div class="settings-sheet glass" role="dialog" aria-modal="true" aria-label="Impostazioni">
+      <div class="settings-sheet glass" role="dialog" aria-modal="true" aria-label="${t('Impostazioni')}">
         <nav class="settings-nav">
-          <div class="settings-nav-title">Impostazioni</div>
-          ${SECTIONS.map((s) => `<button class="nav-item" data-section="${s.id}">${s.icon}<span>${s.label}</span></button>`).join('')}
-          <div class="settings-nav-foot">Second Brain</div>
+          <div class="settings-nav-title">${t('Impostazioni')}</div>
+          ${SECTIONS.map((s) => `<button class="nav-item" data-section="${s.id}">${s.icon}<span>${t(s.label)}</span></button>`).join('')}
+          <div class="settings-nav-foot">Second Brain · <button class="link-btn" data-action="notices">${t('Licenze')}</button></div>
         </nav>
         <section class="settings-main">
-          <button class="icon-btn sm settings-close" data-action="close" title="Chiudi (esc)">${icons.close}</button>
+          <button class="icon-btn sm settings-close" data-action="close" title="${t('Chiudi')} (esc)">${icons.close}</button>
           <div class="settings-body"></div>
         </section>
       </div>`
@@ -219,51 +220,58 @@ export class SettingsDialog {
     } else if (input.type === 'checkbox') {
       ;(this.settings[key as BoolKey] as boolean) = input.checked
       const all = [...GRAPH_TOGGLES, ...CONTENT_TOGGLES, ...MOTION_TOGGLES, ...Object.values(VIEW_TOGGLES).flat()]
-      this.emit(!!all.find((t) => t.key === key)?.structural)
+      this.emit(!!all.find((def) => def.key === key)?.structural)
     }
   }
 
   private onClick(e: MouseEvent): void {
-    const t = e.target as HTMLElement
-    const nav = t.closest<HTMLElement>('[data-section]')
+    const target = e.target as HTMLElement
+    const lang = target.closest<HTMLElement>('[data-lang]')?.dataset.lang as Lang | undefined
+    if (lang) {
+      // the whole interface is built in one language: reload it in the new one
+      if (lang !== getLang()) void window.api.setLanguage(lang).then(() => location.reload())
+      return
+    }
+    const nav = target.closest<HTMLElement>('[data-section]')
     if (nav) {
       this.section = nav.dataset.section as Section
       this.paint()
       return
     }
-    const view = t.closest<HTMLElement>('.view-card')?.dataset.view as ViewMode | undefined
+    const view = target.closest<HTMLElement>('.view-card')?.dataset.view as ViewMode | undefined
     if (view && view !== this.settings.view) {
       this.settings.view = view
       this.emit(false)
       this.paint()
       return
     }
-    const tone = t.closest<HTMLElement>('[data-tone]')?.dataset.tone as Tone | undefined
+    const tone = target.closest<HTMLElement>('[data-tone]')?.dataset.tone as Tone | undefined
     if (tone) {
       this.settings.tone = tone
       this.emit(false)
       this.paint()
       return
     }
-    const fps = t.closest<HTMLElement>('[data-fps]')?.dataset.fps
+    const fps = target.closest<HTMLElement>('[data-fps]')?.dataset.fps
     if (fps) {
       this.settings.fps = Number(fps) as FrameRate
       this.emit(false)
       this.paint()
       return
     }
-    const accent = t.closest<HTMLElement>('[data-accent]')?.dataset.accent
+    const accent = target.closest<HTMLElement>('[data-accent]')?.dataset.accent
     if (accent) {
       this.settings.accent = accent
       this.emit(false)
       this.paint()
       return
     }
-    const action = t.closest<HTMLElement>('[data-action]')?.dataset.action
+    const action = target.closest<HTMLElement>('[data-action]')?.dataset.action
     if (action === 'close') this.close()
     else if (action === 'relayout') this.onRelayout?.()
     else if (action === 'vault') this.onChangeVault?.()
     else if (action === 'agent') this.onOpenAgent?.()
+    else if (action === 'notices') void window.api.openNotices()
     else if (action === 'reset-view') {
       const s = this.settings as unknown as Record<string, unknown>
       for (const k of VIEW_KEYS[this.settings.view]) s[k] = DEFAULT_SETTINGS[k]
@@ -284,10 +292,10 @@ export class SettingsDialog {
     const scroll = this.body.scrollTop
     const ecoNote =
       this.eco && (this.section === 'theme' || this.section === 'motion')
-        ? `<p class="eco-note">${icons.leaf}<span>Modalità Eco attiva: la grafica gira a 30 fps al massimo, a risoluzione normale, senza bagliore, grana e profondità di campo e con meno atmosfera. Queste impostazioni restano salvate e tornano in uso passando a Basic.</span></p>`
+        ? `<p class="eco-note">${icons.leaf}<span>${t('Modalità Eco attiva: la grafica gira a 30 fps al massimo, a risoluzione normale, senza bagliore, grana e profondità di campo e con meno atmosfera. Queste impostazioni restano salvate e tornano in uso passando a Basic.')}</span></p>`
         : ''
     this.body.innerHTML = `
-      <header class="settings-head"><h2>${meta.label}</h2><p>${meta.lead}</p></header>
+      <header class="settings-head"><h2>${t(meta.label)}</h2><p>${t(meta.lead)}</p></header>
       ${ecoNote}
       ${this.renderSection()}`
     this.body.querySelectorAll<HTMLInputElement>('input[type=range]').forEach(setFill)
@@ -315,20 +323,20 @@ export class SettingsDialog {
             true
           )}
           ${group(
-            `Aspetto · ${viewName}`,
+            `${t('Aspetto')} · ${viewName}`,
             card(
               (s.view === 'minimal'
                 ? row(
                     'Tono',
-                    'Chiaro come la carta o scuro; «Sistema» segue macOS',
+                    'Chiaro come la carta o scuro; «Sistema» segue il computer',
                     `<div class="segmented">${TONES.map(
-                      (t) => `<button data-tone="${t.id}" class="${s.tone === t.id ? 'on' : ''}">${t.icon}<span>${t.label}</span></button>`
+                      (tone) => `<button data-tone="${tone.id}" class="${s.tone === tone.id ? 'on' : ''}">${tone.icon}<span>${t(tone.label)}</span></button>`
                     ).join('')}</div>`
                   )
                 : '') +
-                toggles.map((t) => toggleRow(t, s)).join('') +
+                toggles.map((def) => toggleRow(def, s)).join('') +
                 sliders.map((d) => sliderRow(d, s)).join('')
-            ) + `<button class="link-btn reset" data-action="reset-view">${icons.reset}Ripristina l’aspetto predefinito di ${viewName}</button>`
+            ) + `<button class="link-btn reset" data-action="reset-view">${icons.reset}${t('Ripristina l’aspetto predefinito di {name}', { name: viewName })}</button>`
           )}
           ${group(
             'Colore d’accento',
@@ -337,29 +345,39 @@ export class SettingsDialog {
                 'Accento',
                 'Pulsanti, selezioni e indicatori dell’interfaccia',
                 `<div class="swatches">${ACCENTS.map(
-                  (a) => `<button class="swatch ${a.color === s.accent ? 'on' : ''}" data-accent="${a.color}" title="${a.name}" style="--c:${a.color}"></button>`
+                  (a) => `<button class="swatch ${a.color === s.accent ? 'on' : ''}" data-accent="${a.color}" title="${t(a.name)}" style="--c:${a.color}"></button>`
                 ).join('')}</div>`
+              )
+            )
+          )}
+          ${group(
+            'Lingua',
+            card(
+              row(
+                'Lingua dell’interfaccia',
+                'L’agente risponde nella lingua in cui gli scrivi',
+                `<div class="segmented">${LANGS.map((l) => `<button data-lang="${l.id}" class="${getLang() === l.id ? 'on' : ''}"><span>${l.label}</span></button>`).join('')}</div>`
               )
             )
           )}`
       }
       case 'graph':
         return `
-          ${group('Neuroni e sinapsi', card(GRAPH_SLIDERS.map((d) => sliderRow(d, s)).join('') + GRAPH_TOGGLES.map((t) => toggleRow(t, s)).join('')))}
-          ${group('Contenuto', card(CONTENT_TOGGLES.map((t) => toggleRow(t, s)).join('')))}
+          ${group('Neuroni e sinapsi', card(GRAPH_SLIDERS.map((d) => sliderRow(d, s)).join('') + GRAPH_TOGGLES.map((def) => toggleRow(def, s)).join('')))}
+          ${group('Contenuto', card(CONTENT_TOGGLES.map((def) => toggleRow(def, s)).join('')))}
           ${group(
             'Layout',
             card(
               row(
                 'Ricalcola layout',
                 'Ridispone da zero tutti i neuroni secondo le regioni',
-                `<button class="btn ghost sm" data-action="relayout">${icons.refresh}Ricalcola</button>`
+                `<button class="btn ghost sm" data-action="relayout">${icons.refresh}${t('Ricalcola')}</button>`
               )
             )
           )}`
       case 'motion':
         return `
-          ${group('Camera e aiuti', card(MOTION_TOGGLES.map((t) => toggleRow(t, s)).join('')))}
+          ${group('Camera e aiuti', card(MOTION_TOGGLES.map((def) => toggleRow(def, s)).join('')))}
           ${group(
             'Fluidità',
             card(
@@ -383,15 +401,15 @@ export class SettingsDialog {
                     <span class="vi">${icons.vault}</span>
                     <span class="vt"><b>${esc(v.name)}</b><small>${esc(v.path.replace(/^\/Users\/[^/]+/, '~'))}</small></span>
                   </div>
-                  <div class="vault-stats"><span><b>${v.notes.toLocaleString('it-IT')}</b> neuroni</span><span><b>${v.links.toLocaleString('it-IT')}</b> sinapsi</span></div>`
-                : `<p class="muted pad">Nessun vault aperto.</p>`
+                  <div class="vault-stats"><span><b>${v.notes.toLocaleString(localeTag())}</b> ${t('neuroni')}</span><span><b>${v.links.toLocaleString(localeTag())}</b> ${t('sinapsi')}</span></div>`
+                : `<p class="muted pad">${t('Nessun vault aperto.')}</p>`
             )
           )}
           ${group(
             'Azioni',
             card(
-              row('Cambia vault', 'Apri un altro vault di Obsidian o una cartella qualsiasi', `<button class="btn ghost sm" data-action="vault">${icons.folder}Scegli…</button>`) +
-                row('Ricalcola layout', 'Utile dopo grandi riorganizzazioni del vault', `<button class="btn ghost sm" data-action="relayout">${icons.refresh}Ricalcola</button>`)
+              row('Cambia vault', 'Apri un altro vault di Obsidian o una cartella qualsiasi', `<button class="btn ghost sm" data-action="vault">${icons.folder}${t('Scegli…')}</button>`) +
+                row('Ricalcola layout', 'Utile dopo grandi riorganizzazioni del vault', `<button class="btn ghost sm" data-action="relayout">${icons.refresh}${t('Ricalcola')}</button>`)
             )
           )}`
       }
@@ -399,11 +417,11 @@ export class SettingsDialog {
         return group(
           'Agente locale',
           card(
-            `<p class="pad muted">L’agente usa un modello locale (Ollama o LM Studio) per leggere, cercare e modificare le note del vault. Ogni modifica passa da un’anteprima con diff e si può annullare.</p>` +
+            `<p class="pad muted">${t('L’agente usa un modello che gira sul tuo computer (quello integrato, oppure Ollama o LM Studio) per leggere, cercare e modificare le note del vault. Ogni modifica passa da un’anteprima con diff e si può annullare.')}</p>` +
               row(
                 'Modello, ricerca semantica e MCP',
                 'Server, modello di chat, embedding e configurazione per altre app',
-                `<button class="btn ghost sm" data-action="agent">${icons.agent}Apri</button>`
+                `<button class="btn ghost sm" data-action="agent">${icons.agent}${t('Apri')}</button>`
               )
           )
         )
@@ -411,7 +429,7 @@ export class SettingsDialog {
         return SHORTCUTS.map((g) =>
           group(
             g.group,
-            card(g.keys.map(([k, label]) => `<div class="set-row key-row"><span>${label}</span><span class="keys">${k.split(' ').filter(Boolean).map((x) => `<kbd>${x}</kbd>`).join('')}</span></div>`).join(''))
+            card(g.keys.map(([k, label]) => `<div class="set-row key-row"><span>${t(label)}</span><span class="keys">${k.split(' ').filter(Boolean).map((x) => `<kbd>${x}</kbd>`).join('')}</span></div>`).join(''))
           )
         ).join('')
     }
@@ -420,22 +438,23 @@ export class SettingsDialog {
 
 /* ------------------------------------------------------------------ helpers */
 
+// titles, labels and hints are Italian source strings: the helpers translate them
 const group = (title: string, content: string, bare = false): string =>
-  `<div class="set-group${bare ? ' bare' : ''}"><h3>${title}</h3>${content}</div>`
+  `<div class="set-group${bare ? ' bare' : ''}"><h3>${t(title)}</h3>${content}</div>`
 
 const card = (content: string): string => (content ? `<div class="set-card">${content}</div>` : '')
 
 const row = (label: string, hint: string, control: string): string =>
-  `<div class="set-row"><div class="set-label"><span>${label}</span>${hint ? `<small>${hint}</small>` : ''}</div><div class="set-control">${control}</div></div>`
+  `<div class="set-row"><div class="set-label"><span>${t(label)}</span>${hint ? `<small>${t(hint)}</small>` : ''}</div><div class="set-control">${control}</div></div>`
 
-function toggleRow(t: ToggleDef, s: AppSettings): string {
-  return `<label class="set-row toggle-row"><div class="set-label"><span>${t.label}</span>${t.hint ? `<small>${t.hint}</small>` : ''}</div>
-    <span class="toggle"><input type="checkbox" data-key="${t.key}" ${s[t.key] ? 'checked' : ''} /><i></i></span></label>`
+function toggleRow(def: ToggleDef, s: AppSettings): string {
+  return `<label class="set-row toggle-row"><div class="set-label"><span>${t(def.label)}</span>${def.hint ? `<small>${t(def.hint)}</small>` : ''}</div>
+    <span class="toggle"><input type="checkbox" data-key="${def.key}" ${s[def.key] ? 'checked' : ''} /><i></i></span></label>`
 }
 
 function sliderRow(d: SliderDef, s: AppSettings): string {
   const v = s[d.key]
-  return `<label class="set-row slider-row"><div class="set-label"><span>${d.label}</span>${d.hint ? `<small>${d.hint}</small>` : ''}</div>
+  return `<label class="set-row slider-row"><div class="set-label"><span>${t(d.label)}</span>${d.hint ? `<small>${t(d.hint)}</small>` : ''}</div>
     <div class="set-control"><input type="range" data-key="${d.key}" min="${d.min}" max="${d.max}" step="${d.step}" value="${v}" /><output data-out="${d.key}">${fmt(v)}</output></div></label>`
 }
 

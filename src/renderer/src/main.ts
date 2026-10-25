@@ -14,6 +14,8 @@ import { NotePanel } from './ui/panel'
 import { SearchPalette } from './ui/search'
 import { SettingsDialog } from './ui/settings'
 import { Welcome } from './ui/welcome'
+import { DownloadBadge, SetupWizard } from './ui/setup'
+import { localeTag, setLang, t } from '@shared/i18n'
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector<T>(sel)!
 
@@ -34,11 +36,17 @@ const colorOf = (n: GraphNode): string => '#' + (palette.get(n.group)?.getHexStr
 document.documentElement.dataset.platform = /Mac/.test(navigator.userAgent) ? 'mac' : 'other'
 
 async function boot(): Promise<void> {
+  setLang(await window.api.getLanguage())
+  document.documentElement.lang = (await window.api.getLanguage()) === 'en' ? 'en' : 'it'
   settings = { ...DEFAULT_SETTINGS, ...(await window.api.getSettings()) }
   let mode: AppMode = (await window.api.getMode()) ?? DEFAULT_MODE
   const mod = document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl '
-  $('#search-btn').innerHTML = `${icons.search}<span>Cerca un neurone…</span><kbd>${mod}K</kbd>`
-  $('#agent-btn').innerHTML = `${icons.agent}<span>Agente</span>`
+  $('#search-btn').innerHTML = `${icons.search}<span>${t('Cerca un neurone…')}</span><kbd>${mod}K</kbd>`
+  $('#agent-btn').innerHTML = `${icons.agent}<span>${t('Agente')}</span>`
+  $('#vault-btn').title = t('Cambia vault')
+  $('#agent-btn').title = t('Agente AI') + ` (${mod.trim()}J)`
+  $('#search-btn').title = t('Cerca') + ` (${mod.trim()}K)`
+  $('#settings-btn').title = t('Impostazioni') + ` (${mod.trim()},)`
   $('#settings-btn').innerHTML = icons.sliders
   applyTheme()
 
@@ -53,9 +61,9 @@ async function boot(): Promise<void> {
   paintHint()
   const agentPanel = new AgentPanel($('#agent'), {
     resolve: (target) => {
-      const t = target.replace(/\.md$/i, '')
-      if (nodeById.has(t + '.md')) return t + '.md'
-      return titleIndex.get(normalizeTitle(t.split('/').pop()!)) ?? null
+      const name = target.replace(/\.md$/i, '')
+      if (nodeById.has(name + '.md')) return name + '.md'
+      return titleIndex.get(normalizeTitle(name.split('/').pop()!)) ?? null
     },
     exists: (id) => shownIds.has(id),
     openNote: (id) => {
@@ -93,7 +101,7 @@ async function boot(): Promise<void> {
     const el = $('#progress')
     el.classList.toggle('hidden', done)
     ;($('#progress .bar i') as HTMLElement).style.width = `${Math.round(progress * 100)}%`
-    $('#progress span').textContent = `Formazione della rete neurale… ${Math.round(progress * 100)}%`
+    $('#progress span').textContent = t('Formazione della rete neurale… {pct}%', { pct: Math.round(progress * 100) })
     if (done) {
       const layout = brain.getLayout()
       if (graph) graph.positions = layout
@@ -137,7 +145,7 @@ async function boot(): Promise<void> {
   modeMenu.onChange = (m) => {
     applyMode(m)
     void window.api.setMode(m)
-    toast(m === 'eco' ? 'Modalità Eco: grafica leggera, agente in sola lettura' : `Modalità ${MODES.find((x) => x.id === m)!.label}`)
+    toast(m === 'eco' ? t('Modalità Eco: grafica leggera, agente in sola lettura') : t('Modalità {name}', { name: MODES.find((x) => x.id === m)!.label }))
   }
 
   dock.onZoom = (f) => brain.zoom(f)
@@ -180,7 +188,7 @@ async function boot(): Promise<void> {
     if (view === settings.view) return
     commit({ ...settings, view })
     settingsUi.update(settings)
-    toast(`Vista ${VIEWS.find((v) => v.id === view)!.name}`)
+    toast(t('Vista {name}', { name: VIEWS.find((v) => v.id === view)!.name }))
   }
   welcome.onOpen = (path) => {
     welcome.hide()
@@ -248,7 +256,7 @@ async function boot(): Promise<void> {
     rebuild(false)
     const after = g.nodes.filter((n) => n.kind === 'note' || n.kind === 'moc').length
     const diff = after - before
-    toast(diff > 0 ? `Vault aggiornato · +${diff} neuroni` : diff < 0 ? `Vault aggiornato · ${diff} neuroni` : 'Vault aggiornato')
+    toast(diff > 0 ? t('Vault aggiornato · +{n} neuroni', { n: diff }) : diff < 0 ? t('Vault aggiornato · {n} neuroni', { n: diff }) : t('Vault aggiornato'))
   })
 
   function rebuild(intro: boolean): void {
@@ -317,7 +325,7 @@ async function boot(): Promise<void> {
       colorOf
     )
     const neurons = nodes.filter((n) => n.kind === 'note' || n.kind === 'moc').length
-    $('#stats').innerHTML = `<b>${neurons.toLocaleString('it-IT')}</b> neuroni<span class="dot">·</span><b>${links.length.toLocaleString('it-IT')}</b> sinapsi`
+    $('#stats').innerHTML = `<b>${neurons.toLocaleString(localeTag())}</b> ${t('neuroni')}<span class="dot">·</span><b>${links.length.toLocaleString(localeTag())}</b> ${t('sinapsi')}`
     $('#vault-btn').innerHTML = `${icons.vault}<span>${esc(graph.vaultName)}</span>`
     settingsUi.setVault(graph.vaultName, graph.vaultPath, neurons, links.length)
     $('#app').classList.add('ready')
@@ -325,7 +333,7 @@ async function boot(): Promise<void> {
 
   async function openVault(path: string, w: Welcome): Promise<void> {
     $('#progress').classList.remove('hidden')
-    $('#progress span').textContent = 'Lettura del vault…'
+    $('#progress span').textContent = t('Lettura del vault…')
     try {
       const g = await window.api.loadVault(path)
       const first = !graph || graph.vaultPath !== g.vaultPath
@@ -337,7 +345,7 @@ async function boot(): Promise<void> {
       rebuild(first)
     } catch (err) {
       $('#progress').classList.add('hidden')
-      void w.show({ error: `Impossibile aprire il vault: ${String(err)}` })
+      void w.show({ error: t('Impossibile aprire il vault: {error}', { error: String(err) }) })
     }
   }
 
@@ -347,8 +355,19 @@ async function boot(): Promise<void> {
   window.addEventListener('keydown', hideHint, { once: true })
   $('#stage').addEventListener('pointerdown', hideHint, { once: true })
 
+  const wizard = new SetupWizard($('#setup'))
+  const badge = new DownloadBadge($('#dl-badge'))
+  badge.onOpen = () => agentPanel.openSettings()
+  wizard.onDone = (demo) => {
+    void agentPanel.reloadSettings()
+    if (demo) void openVault(demo, welcome)
+    else void welcome.show()
+  }
+
+  const setup = await window.api.setupInfo()
   const last = await window.api.getLastVault()
-  if (last) void openVault(last, welcome)
+  if (setup.first) void wizard.show(setup)
+  else if (last) void openVault(last, welcome)
   else void welcome.show()
 }
 
@@ -366,12 +385,12 @@ function paintHint(): void {
   const el = $('#hint')
   el.classList.toggle('off', !settings.hints)
   const items: [string, string][] = [
-    ['trascina', 'ruota'],
+    [t('trascina'), t('ruota')],
     ['scroll', 'zoom'],
-    ['W A S D', 'vola'],
-    ['click', 'apri neurone'],
-    [`${document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl'} ,`, 'impostazioni'],
-    ['?', 'scorciatoie']
+    ['W A S D', t('vola')],
+    ['click', t('apri neurone')],
+    [`${document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl'} ,`, t('impostazioni')],
+    ['?', t('scorciatoie')]
   ]
   el.innerHTML = items.map(([k, label]) => `<span><kbd>${k}</kbd> ${label}</span>`).join('')
 }

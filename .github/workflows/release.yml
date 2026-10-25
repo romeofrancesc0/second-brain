@@ -1,7 +1,10 @@
 name: Release
 
 # Push a tag like v0.2.0 (after bumping "version" in package.json) to build
-# the installers and publish them as a GitHub Release.
+# the installers and publish them as a GitHub Release, here and in the public
+# romeofrancesc0/second-brain-releases repository the website downloads from.
+# Run it by hand (workflow_dispatch) to build the installers without publishing:
+# they are kept as artifacts of the run.
 on:
   push:
     tags: ['v*']
@@ -60,3 +63,12 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "Second Brain ${{ github.ref_name }}" \
             --generate-notes
+      # RELEASES_TOKEN: fine-grained token with Contents read/write on second-brain-releases only
+      - name: Publish the installers to the public downloads repository
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" installers/* \
+            --repo romeofrancesc0/second-brain-releases \
+            --title "Second Brain ${{ github.ref_name }}" \
+            --notes "Second Brain ${{ github.ref_name }} for macOS (Apple Silicon and Intel) and Windows. Website: https://www.romeo-francesco.it/secondbrain"

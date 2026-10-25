@@ -80,6 +80,18 @@
       {
         "from": "resources/llama/${os}-${arch}",
         "to": "llama/${os}-${arch}"
+      },
+      {
+        "from": "resources/demo-vault",
+        "to": "demo-vault"
+      },
+      {
+        "from": "resources/THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
       }
     ]
   },

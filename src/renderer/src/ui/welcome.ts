@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import type { KnownVault } from '@shared/types'
 import { icons } from './icons'
 
@@ -7,14 +8,14 @@ export class Welcome {
 
   constructor(private el: HTMLElement) {
     el.addEventListener('click', async (e) => {
-      const t = e.target as HTMLElement
-      const card = t.closest<HTMLElement>('[data-path]')
+      const target = e.target as HTMLElement
+      const card = target.closest<HTMLElement>('[data-path]')
       if (card) return this.onOpen?.(card.dataset.path!)
-      if (t.closest('[data-action=choose]')) {
+      if (target.closest('[data-action=choose]')) {
         const path = await window.api.chooseVault()
         if (path) this.onOpen?.(path)
       }
-      if (t.closest('[data-action=close]')) this.hide()
+      if (target.closest('[data-action=close]')) this.hide()
     })
   }
 
@@ -25,14 +26,14 @@ export class Welcome {
         ${opts.closable ? `<button class="icon-btn sm close" data-action="close">${icons.close}</button>` : ''}
         <div class="orb"></div>
         <h1>Second Brain</h1>
-        <p class="lead">Esplora il tuo vault Obsidian come una rete neurale in tre dimensioni.</p>
+        <p class="lead">${t('Esplora il tuo vault Obsidian come una rete neurale in tre dimensioni.')}</p>
         ${opts.error ? `<p class="error">${esc(opts.error)}</p>` : ''}
         ${
           vaults.length
-            ? `<h4>Vault trovati da Obsidian</h4><div class="vault-list">${vaults.map((v) => vaultCard(v)).join('')}</div>`
-            : `<p class="muted">Nessun vault di Obsidian trovato su questo Mac.</p>`
+            ? `<h4>${t('Vault trovati da Obsidian')}</h4><div class="vault-list">${vaults.map((v) => vaultCard(v)).join('')}</div>`
+            : `<p class="muted">${t('Nessun vault di Obsidian trovato su questo computer.')}</p>`
         }
-        <button class="btn primary" data-action="choose">${icons.folder}Scegli una cartella…</button>
+        <button class="btn primary" data-action="choose">${icons.folder}${t('Scegli una cartella…')}</button>
       </div>`
     this.el.classList.remove('hidden')
   }
