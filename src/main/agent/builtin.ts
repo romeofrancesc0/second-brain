@@ -1,5 +1,6 @@
+import { t } from '@shared/i18n'
 import { join } from 'node:path'
-import { ensureServer, explain, ServerError, serverTail, stopServer } from './llamaServer'
+import { ensureServer, explain, isMemoryError, ServerError, serverTail, stopServer } from './llamaServer'
 import { ModelError, OpenAICompatClient, type ChatClient, type ChatOptions, type ChatResult } from './llm'
 import { catalogModel, installedModels, installedVision, modelsDir, verifyModel } from './models'
 
@@ -9,23 +10,23 @@ export class BuiltinClient implements ChatClient {
 
   async listModels(): Promise<string[]> {
     const ids = await installedModels(this.dataDir)
-    if (!ids.length) throw new ModelError('no-model', 'Nessun modello scaricato.')
+    if (!ids.length) throw new ModelError('no-model', t('Nessun modello scaricato.'))
     return ids
   }
 
   async chat(o: ChatOptions): Promise<ChatResult> {
     const m = catalogModel(o.model)
-    if (!m) throw new ModelError('no-model', `Modello sconosciuto: ${o.model}`)
+    if (!m) throw new ModelError('no-model', t('Modello sconosciuto: {id}', { id: o.model }))
     // a damaged file can crash llama.cpp's loader: check it first (fast once verified)
     if (!(await verifyModel(this.dataDir, m.id)))
-      throw new ModelError('no-model', "Il file del modello era danneggiato e l'ho rimosso: scaricalo di nuovo dalle impostazioni dell'agente.")
+      throw new ModelError('no-model', t("Il file del modello era danneggiato e l'ho rimosso: scaricalo di nuovo dalle impostazioni dell'agente."))
     // without images (Eco) the vision file is not loaded: less memory and a faster start
     const mmproj = o.vision === false ? null : await installedVision(this.dataDir, m.id)
     let server
     try {
       server = await ensureServer({ model: join(modelsDir(this.dataDir), m.file), mmproj: mmproj ?? undefined, numCtx: o.numCtx }, join(this.dataDir, 'logs'))
     } catch (err) {
-      if (err instanceof ServerError) throw new ModelError(/Memoria/.test(err.message) ? 'no-memory' : 'http', err.message)
+      if (err instanceof ServerError) throw new ModelError(isMemoryError(err.message) ? 'no-memory' : 'http', err.message)
       throw err
     }
     const client = new OpenAICompatClient(server.baseUrl + '/v1', {
@@ -40,7 +41,7 @@ export class BuiltinClient implements ChatClient {
       // the server stopped during the request: say why
       if (err instanceof ModelError && err.code === 'connection') {
         const why = explain(serverTail())
-        throw new ModelError(/Memoria/.test(why) ? 'no-memory' : 'http', why)
+        throw new ModelError(isMemoryError(why) ? 'no-memory' : 'http', why)
       }
       throw err
     }
@@ -51,7 +52,7 @@ export class BuiltinClient implements ChatClient {
   }
 
   async embed(): Promise<number[][]> {
-    throw new ModelError('http', 'Il modello integrato non calcola embedding: la ricerca usa le parole chiave.')
+    throw new ModelError('http', t('Il modello integrato non calcola embedding: la ricerca usa le parole chiave.'))
   }
 }
 

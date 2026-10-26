@@ -1,3 +1,4 @@
+import { localeTag, t } from '@shared/i18n'
 import { icons } from './icons'
 
 export interface LegendGroup {
@@ -59,20 +60,20 @@ export class Legend {
     const total = this.groups.reduce((s, g) => s + g.count, 0)
     this.el.innerHTML = `
       <div class="legend-head" data-action="toggle-collapse">
-        <span>Regioni</span><span class="count">${this.groups.length}</span>
+        <span>${t('Regioni')}</span><span class="count">${this.groups.length}</span>
         <span class="chev">${icons.chevron}</span>
       </div>
       <ul>
         ${this.groups
           .map(
-            (g) => `<li data-group="${esc(g.name)}" class="${this.hidden.has(g.name) ? 'off' : ''}" title="${esc(g.name)} — click per nascondere, ⌥ click per isolare">
+            (g) => `<li data-group="${esc(g.name)}" class="${this.hidden.has(g.name) ? 'off' : ''}" title="${esc(g.name)} — ${t('click per nascondere, ⌥ click per isolare')}">
               <i style="--c:${g.color}"></i><span class="name">${esc(g.name)}</span>
               <span class="bar"><b style="width:${Math.max(4, (g.count / Math.max(1, this.groups[0]?.count ?? 1)) * 100)}%;--c:${g.color}"></b></span>
               <span class="n">${g.count}</span></li>`
           )
           .join('')}
       </ul>
-      ${this.hidden.size ? `<button class="link-btn" data-action="show-all">Mostra tutte (${this.hidden.size} nascoste)</button>` : `<div class="legend-foot">${total.toLocaleString('it-IT')} elementi · ⌥ click per isolare</div>`}`
+      ${this.hidden.size ? `<button class="link-btn" data-action="show-all">${t('Mostra tutte ({n} nascoste)', { n: this.hidden.size })}</button>` : `<div class="legend-foot">${t('{n} elementi · ⌥ click per isolare', { n: total.toLocaleString(localeTag()) })}</div>`}`
     this.el.classList.toggle('collapsed', this.collapsed)
   }
 }

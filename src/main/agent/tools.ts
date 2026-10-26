@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, promises as fs } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { Document, parseDocument, type YAMLSeq } from 'yaml'
+import { t } from '@shared/i18n'
 import type { DiffLine } from '@shared/types'
 import { safeVaultPath } from '../vault'
 import { normalize, type VaultKnowledge } from './knowledge'
@@ -102,17 +103,17 @@ function noteOrError(k: VaultKnowledge, ref: unknown): { id: string } | ToolResu
   const r = k.resolveNote(str(ref))
   if ('id' in r) return r
   return {
-    content: `${r.error}.${r.suggestions.length ? ' Forse intendevi: ' + r.suggestions.map((t) => `[[${t}]]`).join(', ') : ''}`,
-    summary: 'Nota non trovata',
+    content: `${r.error}.${r.suggestions.length ? ' ' + t('Forse intendevi: {list}', { list: r.suggestions.map((s) => `[[${s}]]`).join(', ') }) : ''}`,
+    summary: t('Nota non trovata'),
     ids: []
   }
 }
 
 function assertWritable(id: string): void {
   const parts = id.split('/')
-  if (!id.toLowerCase().endsWith('.md')) throw new Error('Si possono modificare solo note Markdown (.md)')
-  if (parts.some((p) => p.startsWith('.'))) throw new Error('Cartella non modificabile')
-  if (PROTECTED_FOLDERS.includes(parts[0].toLowerCase())) throw new Error(`La cartella ${parts[0]}/ contiene le fonti originali e non va modificata`)
+  if (!id.toLowerCase().endsWith('.md')) throw new Error(t('Si possono modificare solo note Markdown (.md)'))
+  if (parts.some((p) => p.startsWith('.'))) throw new Error(t('Cartella non modificabile'))
+  if (PROTECTED_FOLDERS.includes(parts[0].toLowerCase())) throw new Error(t('La cartella {folder}/ contiene le fonti originali e non va modificata', { folder: parts[0] }))
 }
 
 function splitRaw(src: string): { fm: string | null; body: string } {
@@ -185,12 +186,12 @@ async function applyWrite(ctx: ToolContext, tool: string, id: string, after: str
   assertWritable(id)
   const abs = safeVaultPath(ctx.vaultPath, id)
   const before = isNew ? '' : await fs.readFile(abs, 'utf8')
-  if (!isNew && before === after) return { content: 'Nessuna modifica necessaria: il contenuto è già quello richiesto.', summary: 'Nessuna modifica', ids: [id] }
+  if (!isNew && before === after) return { content: t('Nessuna modifica necessaria: il contenuto è già quello richiesto.'), summary: t('Nessuna modifica'), ids: [id] }
   const ok = await ctx.approve({ tool, id, isNew, before, after, diff: lineDiff(before, after) })
   if (!ok)
     return {
-      content: "L'utente ha rifiutato questa modifica. Non riproporla uguale: chiedi all'utente come preferisce procedere.",
-      summary: 'Modifica rifiutata',
+      content: t("L'utente ha rifiutato questa modifica. Non riproporla uguale: chiedi all'utente come preferisce procedere."),
+      summary: t('Modifica rifiutata'),
       ids: [id],
       rejected: true
     }
@@ -208,8 +209,8 @@ async function applyWrite(ctx: ToolContext, tool: string, id: string, after: str
   await fs.appendFile(journalPath(ctx.dataDir), JSON.stringify(change) + '\n')
   await ctx.refresh()
   return {
-    content: isNew ? `Nota creata: ${id}` : `Nota aggiornata: ${id}`,
-    summary: isNew ? 'Nota creata' : 'Nota aggiornata',
+    content: isNew ? t('Nota creata: {id}', { id }) : t('Nota aggiornata: {id}', { id }),
+    summary: isNew ? t('Nota creata') : t('Nota aggiornata'),
     ids: [id],
     change
   }
@@ -229,16 +230,16 @@ export async function undoChange(
   const undone = new Set(entries.filter((e) => e.undo).map((e) => e.undo))
   const changes = entries.filter((e) => !e.undo)
   const change = changes.find((c) => c.changeId === changeId)
-  if (!change) return { ok: false, message: 'Modifica non trovata nel registro' }
-  if (undone.has(changeId)) return { ok: false, message: 'Modifica già annullata' }
+  if (!change) return { ok: false, message: t('Modifica non trovata nel registro') }
+  if (undone.has(changeId)) return { ok: false, message: t('Modifica già annullata') }
   // restoring an older backup would silently drop the later edits to the same note
   if (changes.some((c) => c.id === change.id && c.time > change.time && !undone.has(c.changeId)))
-    return { ok: false, message: 'Questa nota è stata modificata di nuovo dopo: annulla prima le modifiche più recenti.' }
+    return { ok: false, message: t('Questa nota è stata modificata di nuovo dopo: annulla prima le modifiche più recenti.') }
   const abs = safeVaultPath(vaultPath, change.id)
   if (change.kind === 'create') {
     if (existsSync(abs)) await trash(abs)
   } else {
-    if (!change.backup) return { ok: false, message: 'Backup mancante' }
+    if (!change.backup) return { ok: false, message: t('Backup mancante') }
     // keep the current text too, so the undo itself can be reverted by hand
     if (existsSync(abs)) await fs.copyFile(abs, change.backup.replace(/\.md$/, '.before-undo.md'))
     await fs.writeFile(abs, await fs.readFile(change.backup, 'utf8'))
@@ -246,7 +247,7 @@ export async function undoChange(
   await fs.appendFile(journalPath(dataDir), JSON.stringify({ undo: changeId, time: Date.now() }) + '\n')
   return {
     ok: true,
-    message: change.kind === 'create' ? `Nota spostata nel Cestino: ${change.id}` : `Ripristinata la versione precedente di ${change.id}`
+    message: change.kind === 'create' ? t('Nota spostata nel Cestino: {id}', { id: change.id }) : t('Ripristinata la versione precedente di {id}', { id: change.id })
   }
 }
 
@@ -260,14 +261,14 @@ export const TOOLS: ToolDef[] = [
     description:
       'List the regions of the vault (courses / areas) with the number of notes and the MOC (map of content) note of each. Use it to orient yourself in the vault.',
     parameters: { type: 'object', properties: {} },
-    label: () => 'Panoramica dei corsi',
-    activity: () => 'Esploro le regioni del vault',
+    label: () => t('Panoramica dei corsi'),
+    activity: () => t('Esploro le regioni del vault'),
     async run(_a, ctx) {
       const k = ctx.knowledge()
       const rows = k.courses()
       return {
-        content: rows.map((r) => `- ${r.corso}: ${r.notes} note${r.moc ? ` (MOC: [[${r.moc}]])` : ''}`).join('\n'),
-        summary: `${rows.length} regioni`,
+        content: rows.map((r) => `- ${r.corso}: ${t('{n} note', { n: r.notes })}${r.moc ? ` (MOC: [[${r.moc}]])` : ''}`).join('\n'),
+        summary: t('{n} regioni', { n: rows.length }),
         ids: []
       }
     }
@@ -287,8 +288,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ['query']
     },
-    label: (a) => `Cerca «${str(a.query)}»`,
-    activity: (a) => `Cerco «${str(a.query)}»${where(a)}`,
+    label: (a) => t('Cerca «{q}»', { q: str(a.query) }),
+    activity: (a) => t('Cerco «{q}»', { q: str(a.query) }) + where(a),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const query = str(a.query)
@@ -299,16 +300,16 @@ export const TOOLS: ToolDef[] = [
       let note = ''
       if (!hits.length && (filters.corso || filters.area || filters.tag)) {
         hits = k.search(query, { limit: num(a.limit, 8), queryVector })
-        if (hits.length) note = 'Nessun risultato con i filtri indicati (corso/area/tag non trovati): ecco i risultati in tutto il vault.\n'
+        if (hits.length) note = t('Nessun risultato con i filtri indicati (corso/area/tag non trovati): ecco i risultati in tutto il vault.') + '\n'
       }
-      if (!hits.length) return { content: 'Nessuna nota trovata. Prova con parole diverse o più generiche.', summary: 'Nessun risultato', ids: [] }
+      if (!hits.length) return { content: t('Nessuna nota trovata. Prova con parole diverse o più generiche.'), summary: t('Nessun risultato'), ids: [] }
       return {
         content:
           note +
           hits
           .map((h, i) => `${i + 1}. ${link(k, h.id)}${h.corso ? ` (${h.corso})` : ''}${h.tags.length ? ` #${h.tags.slice(0, 5).join(' #')}` : ''}\n   ${h.snippet}`)
           .join('\n'),
-        summary: `${hits.length} risultati`,
+        summary: t('{n} risultati', { n: hits.length }),
         ids: hits.map((h) => h.id)
       }
     }
@@ -317,8 +318,8 @@ export const TOOLS: ToolDef[] = [
     name: 'read_note',
     description: 'Read the full content of a note, with its metadata, outgoing links and backlinks.',
     parameters: { type: 'object', properties: { note: noteParam }, required: ['note'] },
-    label: (a) => `Legge «${str(a.note)}»`,
-    activity: (a) => `Leggo «${str(a.note)}»`,
+    label: (a) => t('Legge «{note}»', { note: str(a.note) }),
+    activity: (a) => t('Leggo «{note}»', { note: str(a.note) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
@@ -327,25 +328,25 @@ export const TOOLS: ToolDef[] = [
       const node = k.nodes.get(r.id)!
       const out = [...(k.out.get(r.id) ?? [])].filter((x) => k.isNote(x))
       const back = [...(k.in.get(r.id) ?? [])].filter((x) => k.isNote(x))
-      const body = note.body.length > MAX_NOTE_CHARS ? note.body.slice(0, MAX_NOTE_CHARS) + '\n…(troncata)' : note.body
+      const body = note.body.length > MAX_NOTE_CHARS ? note.body.slice(0, MAX_NOTE_CHARS) + `\n…(${t('troncata')})` : note.body
       const images = embeddedImages(note.body)
       return {
         content: [
-          `Titolo: ${node.title}`,
-          `Percorso: ${r.id}`,
-          node.area ? `Area: ${node.area}` : '',
-          node.corso ? `Corso: ${node.corso}` : '',
-          node.tags.length ? `Tag: ${node.tags.join(', ')}` : '',
+          `${t('Titolo')}: ${node.title}`,
+          `${t('Percorso')}: ${r.id}`,
+          node.area ? `${t('Area')}: ${node.area}` : '',
+          node.corso ? `${t('Corso')}: ${node.corso}` : '',
+          node.tags.length ? `${t('Tag')}: ${node.tags.join(', ')}` : '',
           '',
           body.trim(),
           '',
-          `Link in uscita: ${out.map((x) => link(k, x)).join(', ') || 'nessuno'}`,
-          `Backlink: ${back.map((x) => link(k, x)).join(', ') || 'nessuno'}`,
-          ...(images.length ? [`Immagini nella nota: ${images.map((i) => `![[${i}]]`).join(', ')}`] : [])
+          `${t('Link in uscita')}: ${out.map((x) => link(k, x)).join(', ') || t('nessuno')}`,
+          `${t('Backlink')}: ${back.map((x) => link(k, x)).join(', ') || t('nessuno')}`,
+          ...(images.length ? [`${t('Immagini nella nota')}: ${images.map((i) => `![[${i}]]`).join(', ')}`] : [])
         ]
           .filter((l, i) => l !== '' || i > 4)
           .join('\n'),
-        summary: `${node.words} parole`,
+        summary: t('{n} parole', { n: node.words }),
         ids: [r.id]
       }
     }
@@ -363,19 +364,19 @@ export const TOOLS: ToolDef[] = [
       },
       required: ['image']
     },
-    label: (a) => `Guarda «${str(a.image)}»`,
-    activity: (a) => `Guardo «${str(a.image)}»`,
+    label: (a) => t('Guarda «{image}»', { image: str(a.image) }),
+    activity: (a) => t('Guardo «{image}»', { image: str(a.image) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const from = str(a.note) ? k.resolveNote(str(a.note)) : null
       const id = k.resolveAttachment(str(a.image), from && 'id' in from ? from.id : '')
-      if (!id) return { content: `Immagine "${str(a.image)}" non trovata nel vault.`, summary: 'Immagine non trovata', ids: [] }
+      if (!id) return { content: t('Immagine "{image}" non trovata nel vault.', { image: str(a.image) }), summary: t('Immagine non trovata'), ids: [] }
       const type = IMAGE_TYPES[id.split('.').pop()!.toLowerCase()]
-      if (!type) return { content: `Formato non supportato (${id}): posso guardare PNG, JPEG, GIF e BMP.`, summary: 'Formato non supportato', ids: [id] }
+      if (!type) return { content: t('Formato non supportato ({id}): posso guardare PNG, JPEG, GIF e BMP.', { id }), summary: t('Formato non supportato'), ids: [id] }
       const data = await fs.readFile(safeVaultPath(ctx.vaultPath, id))
-      if (data.length > MAX_IMAGE_BYTES) return { content: `L'immagine ${id} è troppo grande (${Math.round(data.length / 1e6)} MB).`, summary: 'Immagine troppo grande', ids: [id] }
+      if (data.length > MAX_IMAGE_BYTES) return { content: t("L'immagine {id} è troppo grande ({mb} MB).", { id, mb: Math.round(data.length / 1e6) }), summary: t('Immagine troppo grande'), ids: [id] }
       return {
-        content: `Ecco l'immagine ${id}: la trovi nel messaggio seguente.`,
+        content: t("Ecco l'immagine {id}: la trovi nel messaggio seguente.", { id }),
         summary: `${Math.round(data.length / 1024)} KB`,
         ids: [id],
         images: [`data:${type};base64,${data.toString('base64')}`]
@@ -386,18 +387,18 @@ export const TOOLS: ToolDef[] = [
     name: 'list_neighbors',
     description: 'List the notes directly connected to a note: the ones it links to and the ones linking to it.',
     parameters: { type: 'object', properties: { note: noteParam }, required: ['note'] },
-    label: (a) => `Collegamenti di «${str(a.note)}»`,
-    activity: (a) => `Seguo i collegamenti di «${str(a.note)}»`,
+    label: (a) => t('Collegamenti di «{note}»', { note: str(a.note) }),
+    activity: (a) => t('Seguo i collegamenti di «{note}»', { note: str(a.note) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
       if (!('id' in r)) return r
       const out = [...(k.out.get(r.id) ?? [])].filter((x) => k.isNote(x))
       const back = [...(k.in.get(r.id) ?? [])].filter((x) => k.isNote(x))
-      const fmt = (ids: string[]): string => ids.map((x) => `${link(k, x)}${k.nodes.get(x)?.corso ? ` (${k.nodes.get(x)!.corso})` : ''}`).join('\n') || 'nessuno'
+      const fmt = (ids: string[]): string => ids.map((x) => `${link(k, x)}${k.nodes.get(x)?.corso ? ` (${k.nodes.get(x)!.corso})` : ''}`).join('\n') || t('nessuno')
       return {
-        content: `Link in uscita da ${link(k, r.id)}:\n${fmt(out)}\n\nBacklink verso ${link(k, r.id)}:\n${fmt(back)}`,
-        summary: `${out.length + back.length} collegamenti`,
+        content: `${t('Link in uscita da {note}', { note: link(k, r.id) })}:\n${fmt(out)}\n\n${t('Backlink verso {note}', { note: link(k, r.id) })}:\n${fmt(back)}`,
+        summary: t('{n} collegamenti', { n: out.length + back.length }),
         ids: [r.id, ...out, ...back]
       }
     }
@@ -414,8 +415,8 @@ export const TOOLS: ToolDef[] = [
         limit: { type: 'integer', description: 'Max titles (default 80)' }
       }
     },
-    label: (a) => `Elenca le note${str(a.corso) ? ` di ${str(a.corso)}` : str(a.tag) ? ` con #${str(a.tag)}` : ''}`,
-    activity: (a) => `Sfoglio le note${str(a.tag) ? ` con #${str(a.tag)}` : ''}${where(a)}`,
+    label: (a) => (str(a.corso) ? t('Elenca le note di {region}', { region: str(a.corso) }) : str(a.tag) ? t('Elenca le note con #{tag}', { tag: str(a.tag) }) : t('Elenca le note')),
+    activity: (a) => (str(a.tag) ? t('Sfoglio le note con #{tag}', { tag: str(a.tag) }) : t('Sfoglio le note')) + where(a),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const corso = normalize(str(a.corso))
@@ -431,9 +432,9 @@ export const TOOLS: ToolDef[] = [
       const limit = num(a.limit, 80)
       return {
         content: list.length
-          ? `${list.length} note${list.length > limit ? ` (mostro le prime ${limit})` : ''}:\n` + list.slice(0, limit).map((n) => `- [[${n.title}]]`).join('\n')
-          : 'Nessuna nota con questi filtri.',
-        summary: `${list.length} note`,
+          ? `${t('{n} note', { n: list.length })}${list.length > limit ? ` (${t('mostro le prime {n}', { n: limit })})` : ''}:\n` + list.slice(0, limit).map((n) => `- [[${n.title}]]`).join('\n')
+          : t('Nessuna nota con questi filtri.'),
+        summary: t('{n} note', { n: list.length }),
         ids: list.slice(0, limit).map((n) => n.id)
       }
     }
@@ -442,8 +443,8 @@ export const TOOLS: ToolDef[] = [
     name: 'find_path',
     description: 'Find the shortest chain of links that connects two notes, to explain how two concepts are related.',
     parameters: { type: 'object', properties: { from: noteParam, to: noteParam }, required: ['from', 'to'] },
-    label: (a) => `Percorso «${str(a.from)}» → «${str(a.to)}»`,
-    activity: (a) => `Cerco un percorso da «${str(a.from)}» a «${str(a.to)}»`,
+    label: (a) => t('Percorso «{from}» → «{to}»', { from: str(a.from), to: str(a.to) }),
+    activity: (a) => t('Cerco un percorso da «{from}» a «{to}»', { from: str(a.from), to: str(a.to) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const from = noteOrError(k, a.from)
@@ -451,8 +452,8 @@ export const TOOLS: ToolDef[] = [
       const to = noteOrError(k, a.to)
       if (!('id' in to)) return to
       const path = k.path(from.id, to.id)
-      if (!path) return { content: 'Le due note non sono collegate da nessun percorso di link (entro 8 passi).', summary: 'Nessun percorso', ids: [from.id, to.id] }
-      return { content: `Percorso (${path.length - 1} passi): ${path.map((x) => link(k, x)).join(' → ')}`, summary: `${path.length - 1} passi`, ids: path }
+      if (!path) return { content: t('Le due note non sono collegate da nessun percorso di link (entro 8 passi).'), summary: t('Nessun percorso'), ids: [from.id, to.id] }
+      return { content: `${t('Percorso ({n} passi)', { n: path.length - 1 })}: ${path.map((x) => link(k, x)).join(' → ')}`, summary: t('{n} passi', { n: path.length - 1 }), ids: path }
     }
   },
   {
@@ -460,19 +461,19 @@ export const TOOLS: ToolDef[] = [
     description:
       'Find notes whose content is related to a note but that are NOT linked to it yet: candidates for new connections. Use read_note on the candidates to verify before proposing or creating links.',
     parameters: { type: 'object', properties: { note: noteParam, limit: { type: 'integer', description: 'Max candidates (default 8)' } }, required: ['note'] },
-    label: (a) => `Collegamenti mancanti per «${str(a.note)}»`,
-    activity: (a) => `Cerco note affini a «${str(a.note)}»`,
+    label: (a) => t('Collegamenti mancanti per «{note}»', { note: str(a.note) }),
+    activity: (a) => t('Cerco note affini a «{note}»', { note: str(a.note) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
       if (!('id' in r)) return r
       const sims = k.similar(r.id, num(a.limit, 8))
-      if (!sims.length) return { content: 'Nessun candidato trovato.', summary: 'Nessun candidato', ids: [r.id] }
+      if (!sims.length) return { content: t('Nessun candidato trovato.'), summary: t('Nessun candidato'), ids: [r.id] }
       return {
         content: sims
-          .map((s, i) => `${i + 1}. ${link(k, s.id)}${k.nodes.get(s.id)?.corso ? ` (${k.nodes.get(s.id)!.corso})` : ''} — affinità ${s.score}${s.shared.length ? `, termini comuni: ${s.shared.join(', ')}` : ''}`)
+          .map((s, i) => `${i + 1}. ${link(k, s.id)}${k.nodes.get(s.id)?.corso ? ` (${k.nodes.get(s.id)!.corso})` : ''} — ${t('affinità')} ${s.score}${s.shared.length ? `, ${t('termini comuni')}: ${s.shared.join(', ')}` : ''}`)
           .join('\n'),
-        summary: `${sims.length} candidati`,
+        summary: t('{n} candidati', { n: sims.length }),
         ids: [r.id, ...sims.map((s) => s.id)]
       }
     }
@@ -497,15 +498,15 @@ export const TOOLS: ToolDef[] = [
       },
       required: ['title', 'content']
     },
-    label: (a) => `Crea la nota «${str(a.title)}»`,
-    activity: (a) => `Creo «${str(a.title)}»${str(a.folder) ? ` in ${str(a.folder)}` : where(a)}`,
+    label: (a) => t('Crea la nota «{title}»', { title: str(a.title) }),
+    activity: (a) => t('Creo «{title}»', { title: str(a.title) }) + (str(a.folder) ? ` in ${str(a.folder)}` : where(a)),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const title = cleanTitle(str(a.title))
-      if (!title) return { content: 'Titolo mancante.', summary: 'Titolo mancante', ids: [] }
+      if (!title) return { content: t('Titolo mancante.'), summary: t('Titolo mancante'), ids: [] }
       const existing = k.resolveNote(title)
       if ('id' in existing && normalize(k.title(existing.id)) === normalize(title))
-        return { content: `Esiste già la nota ${link(k, existing.id)}: usa update_note o append_to_note.`, summary: 'Esiste già', ids: [existing.id] }
+        return { content: t('Esiste già la nota {note}: usa update_note o append_to_note.', { note: link(k, existing.id) }), summary: t('Esiste già'), ids: [existing.id] }
       const corso = str(a.corso)
       const area = str(a.area) || majorityArea(k, corso)
       let folder = str(a.folder).replace(/^\/+|\/+$/g, '')
@@ -514,7 +515,7 @@ export const TOOLS: ToolDef[] = [
         else if (existsSync(join(ctx.vaultPath, 'Neuroni'))) folder = 'Neuroni'
       }
       const id = (folder ? folder + '/' : '') + title + '.md'
-      if (existsSync(safeVaultPath(ctx.vaultPath, id))) return { content: `Il file ${id} esiste già.`, summary: 'Esiste già', ids: [id] }
+      if (existsSync(safeVaultPath(ctx.vaultPath, id))) return { content: t('Il file {id} esiste già.', { id }), summary: t('Esiste già'), ids: [id] }
       const doc = new Document({ ...(area ? { area } : {}), ...(corso ? { corso } : {}) })
       const fm = withTags(doc.toString(), strList(a.tags))
       let body = str(a.content)
@@ -525,7 +526,7 @@ export const TOOLS: ToolDef[] = [
         .filter((r): r is { id: string } => 'id' in r)
         .map((r) => link(k, r.id))
         .filter((l, i, all) => !body.includes(l) && all.indexOf(l) === i)
-      if (related.length) body += `\n\nVedi anche: ${related.join(' · ')}`
+      if (related.length) body += `\n\n${t('Vedi anche')}: ${related.join(' · ')}`
       return applyWrite(ctx, 'create_note', id, compose(fm, body), true)
     }
   },
@@ -543,8 +544,8 @@ export const TOOLS: ToolDef[] = [
       },
       required: ['note']
     },
-    label: (a) => `Modifica «${str(a.note)}»`,
-    activity: (a) => `Modifico «${str(a.note)}»`,
+    label: (a) => t('Modifica «{note}»', { note: str(a.note) }),
+    activity: (a) => t('Modifico «{note}»', { note: str(a.note) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
@@ -553,7 +554,7 @@ export const TOOLS: ToolDef[] = [
       const { fm, body } = splitRaw(src)
       const tags = a.tags !== undefined ? strList(a.tags) : null
       let newBody = a.content !== undefined ? str(a.content) : body
-      if (!newBody.trim()) return { content: 'Contenuto vuoto: non cancello la nota.', summary: 'Contenuto vuoto', ids: [r.id] }
+      if (!newBody.trim()) return { content: t('Contenuto vuoto: non cancello la nota.'), summary: t('Contenuto vuoto'), ids: [r.id] }
       const heading = /^\s*(#\s[^\n]*)/.exec(body)?.[1]
       if (a.content !== undefined && heading && !/^\s*#\s/.test(newBody)) newBody = `${heading}\n\n${newBody}`
       return applyWrite(ctx, 'update_note', r.id, compose(tags ? withTags(fm, tags) : fm, newBody), false)
@@ -564,14 +565,14 @@ export const TOOLS: ToolDef[] = [
     write: true,
     description: 'Append a paragraph (Markdown) at the end of an existing note, keeping the rest unchanged.',
     parameters: { type: 'object', properties: { note: noteParam, text: { type: 'string' } }, required: ['note', 'text'] },
-    label: (a) => `Aggiunge testo a «${str(a.note)}»`,
-    activity: (a) => `Aggiungo testo a «${str(a.note)}»`,
+    label: (a) => t('Aggiunge testo a «{note}»', { note: str(a.note) }),
+    activity: (a) => t('Aggiungo testo a «{note}»', { note: str(a.note) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const r = noteOrError(k, a.note)
       if (!('id' in r)) return r
       const text = str(a.text)
-      if (!text) return { content: 'Testo vuoto.', summary: 'Testo vuoto', ids: [r.id] }
+      if (!text) return { content: t('Testo vuoto.'), summary: t('Testo vuoto'), ids: [r.id] }
       const src = await fs.readFile(safeVaultPath(ctx.vaultPath, r.id), 'utf8')
       const { fm, body } = splitRaw(src)
       return applyWrite(ctx, 'append_to_note', r.id, compose(fm, body.trimEnd() + '\n\n' + text), false)
@@ -587,19 +588,19 @@ export const TOOLS: ToolDef[] = [
       properties: { from: noteParam, to: noteParam, sentence: { type: 'string', description: 'Sentence explaining the relation; [[to]] is added if missing' } },
       required: ['from', 'to']
     },
-    label: (a) => `Collega «${str(a.from)}» → «${str(a.to)}»`,
-    activity: (a) => `Collego «${str(a.from)}» a «${str(a.to)}»`,
+    label: (a) => t('Collega «{from}» → «{to}»', { from: str(a.from), to: str(a.to) }),
+    activity: (a) => t('Collego «{from}» a «{to}»', { from: str(a.from), to: str(a.to) }),
     async run(a, ctx) {
       const k = ctx.knowledge()
       const from = noteOrError(k, a.from)
       if (!('id' in from)) return from
       const to = noteOrError(k, a.to)
       if (!('id' in to)) return to
-      if (from.id === to.id) return { content: 'Non posso collegare una nota a se stessa.', summary: 'Stessa nota', ids: [from.id] }
-      if (k.out.get(from.id)?.has(to.id)) return { content: `${link(k, from.id)} contiene già un link a ${link(k, to.id)}.`, summary: 'Già collegate', ids: [from.id, to.id] }
+      if (from.id === to.id) return { content: t('Non posso collegare una nota a se stessa.'), summary: t('Stessa nota'), ids: [from.id] }
+      if (k.out.get(from.id)?.has(to.id)) return { content: t('{from} contiene già un link a {to}.', { from: link(k, from.id), to: link(k, to.id) }), summary: t('Già collegate'), ids: [from.id, to.id] }
       const target = link(k, to.id)
       let sentence = str(a.sentence)
-      if (!sentence) sentence = `Vedi anche: ${target}`
+      if (!sentence) sentence = `${t('Vedi anche')}: ${target}`
       else if (!sentence.includes('[[')) sentence = `${sentence} (${target})`
       const src = await fs.readFile(safeVaultPath(ctx.vaultPath, from.id), 'utf8')
       const { fm, body } = splitRaw(src)

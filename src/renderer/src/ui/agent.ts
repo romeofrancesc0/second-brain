@@ -10,6 +10,7 @@ import {
   type IndexStatus,
   type ModelDownloadProgress
 } from '@shared/types'
+import { getLang, t } from '@shared/i18n'
 import { icons } from './icons'
 import { decorateCallouts, renderMarkdown } from './markdown'
 
@@ -30,11 +31,12 @@ type Segment =
   | { kind: 'tool'; el: HTMLElement }
   | { kind: 'other'; el: HTMLElement }
 
+// generic enough for any vault; the last one fits the demo vault
 const SUGGESTIONS = [
-  'Riassumi i concetti principali di Fisica II',
-  'Che collegamenti mancano alla nota Trasformata Z?',
-  'Come sono collegati Machine learning e BigData nel mio vault?',
-  'Quali note parlano di regione di convergenza?'
+  'Di cosa parla il mio vault? Riassumilo regione per regione',
+  'Quali collegamenti mancano tra le mie note?',
+  'Quali sono le note più collegate e perché?',
+  'Come sono collegati il cervello e le reti neurali?'
 ]
 
 /** Frames of the status glyph, cycled while the agent works (as in Claude Code). */
@@ -85,20 +87,20 @@ export class AgentPanel {
   ) {
     root.innerHTML = `
       <div class="agent-head">
-        <span class="agent-title">Agente</span>
-        <button class="model-chip" data-action="settings" title="Impostazioni del modello"><i></i><span>—</span></button>
+        <span class="agent-title">${t('Agente')}</span>
+        <button class="model-chip" data-action="settings" title="${t('Impostazioni del modello')}"><i></i><span>—</span></button>
         <div class="agent-actions">
-          <button class="icon-btn sm" data-action="new" title="Nuova conversazione">${icons.plus}</button>
-          <button class="icon-btn sm" data-action="settings" title="Impostazioni AI">${icons.sliders}</button>
-          <button class="icon-btn sm" data-action="close" title="Chiudi (⌘J)">${icons.close}</button>
+          <button class="icon-btn sm" data-action="new" title="${t('Nuova conversazione')}">${icons.plus}</button>
+          <button class="icon-btn sm" data-action="settings" title="${t('Impostazioni AI')}">${icons.sliders}</button>
+          <button class="icon-btn sm" data-action="close" title="${t('Chiudi')} (${document.documentElement.dataset.platform === 'mac' ? '⌘' : 'Ctrl '}J)">${icons.close}</button>
         </div>
       </div>
-      <div class="agent-eco hidden">${icons.leaf}<span><b>Modalità Eco</b> · l’agente cerca e legge le note, ma non crea né modifica nulla e non guarda le immagini. Passa a Basic per l’agente completo.</span></div>
+      <div class="agent-eco hidden">${icons.leaf}<span><b>${t('Modalità Eco')}</b> · ${t('l’agente cerca e legge le note, ma non crea né modifica nulla e non guarda le immagini. Passa a Basic per l’agente completo.')}</span></div>
       <div class="agent-chat">
         <div class="agent-messages"></div>
         <form class="agent-composer">
-          <textarea rows="1" placeholder="Chiedi qualcosa al tuo second brain…" spellcheck="false"></textarea>
-          <button type="submit" class="send" title="Invia (↵)">${icons.send}</button>
+          <textarea rows="1" placeholder="${t('Chiedi qualcosa al tuo second brain…')}" spellcheck="false"></textarea>
+          <button type="submit" class="send" title="${t('Invia')} (↵)">${icons.send}</button>
         </form>
       </div>
       <div class="agent-settings hidden"></div>`
@@ -131,6 +133,13 @@ export class AgentPanel {
   }
 
   private async init(): Promise<void> {
+    this.settings = await window.api.aiGetSettings()
+    await this.refreshStatus()
+    this.paintEmpty()
+  }
+
+  /** Picks up settings saved elsewhere (the first-run wizard chooses the built-in model). */
+  async reloadSettings(): Promise<void> {
     this.settings = await window.api.aiGetSettings()
     await this.refreshStatus()
     this.paintEmpty()
@@ -181,7 +190,7 @@ export class AgentPanel {
     const chip = this.root.querySelector('.model-chip')!
     const ok = this.status?.ok && this.settings.model && this.status.models.includes(this.settings.model)
     chip.className = 'model-chip ' + (ok ? 'ok' : this.status?.ok ? 'warn' : 'off')
-    chip.querySelector('span')!.textContent = this.status?.ok ? this.settings.model || 'scegli un modello' : 'non collegato'
+    chip.querySelector('span')!.textContent = this.status?.ok ? this.modelLabel(this.settings.model) || t('scegli un modello') : t('non collegato')
   }
 
   private paintEmpty(): void {
@@ -189,8 +198,8 @@ export class AgentPanel {
     const ready = this.status?.ok && this.settings.model
     this.messagesEl.innerHTML = ready
       ? `<div class="agent-empty">
-          <p>Fai una domanda sul tuo vault. L'agente cerca e legge le note, ragiona sui collegamenti e — se glielo chiedi — crea o modifica neuroni, chiedendoti conferma per ogni modifica.</p>
-          <div class="suggestions">${SUGGESTIONS.map((s) => `<button class="suggestion">${esc(s)}</button>`).join('')}</div>
+          <p>${t("Fai una domanda sul tuo vault. L'agente cerca e legge le note, ragiona sui collegamenti e — se glielo chiedi — crea o modifica neuroni, chiedendoti conferma per ogni modifica.")}</p>
+          <div class="suggestions">${SUGGESTIONS.map((s) => `<button class="suggestion">${esc(t(s))}</button>`).join('')}</div>
         </div>`
       : this.setupHtml()
   }
@@ -200,21 +209,21 @@ export class AgentPanel {
     const info = this.builtin
     const rec = info?.models.find((m) => m.id === info.recommended)
     const why = rec
-      ? `${esc(rec.label)}, scelto in base alla memoria di questo computer (${info!.ramGb} GB). Si scarica una volta sola e poi funziona senza internet: le note non escono dal computer.`
+      ? t('{name}, scelto in base alla memoria di questo computer ({ram} GB). Si scarica una volta sola e poi funziona senza internet: le note non escono dal computer.', { name: esc(rec.label), ram: info!.ramGb })
       : ''
     return `<div class="agent-empty">
-        <h4>Attiva l'agente</h4>
-        <p>L'agente usa un modello di intelligenza artificiale che gira sul tuo computer. ${why}</p>
+        <h4>${t("Attiva l'agente")}</h4>
+        <p>${t("L'agente usa un modello di intelligenza artificiale che gira sul tuo computer.")} ${why}</p>
         <div class="dl-slot">${this.setupAction()}</div>
         <details class="adv">
-          <summary>Hai già Ollama o LM Studio?</summary>
+          <summary>${t('Hai già Ollama o LM Studio?')}</summary>
           ${this.settings.provider !== 'builtin' && this.status?.error ? `<p class="muted">${esc(this.status.error)}</p>` : ''}
           <ol>
-            <li>Avvia <b>Ollama</b> (oppure il server di LM Studio).</li>
-            <li>Assicurati di avere un modello che supporta gli strumenti (es. Qwen 3, Llama 3.1, Mistral).</li>
-            <li>Sceglilo nelle impostazioni dell'agente.</li>
+            <li>${t('Avvia <b>Ollama</b> (oppure il server di LM Studio).')}</li>
+            <li>${t('Assicurati di avere un modello che supporta gli strumenti (es. Qwen 3, Llama 3.1, Mistral).')}</li>
+            <li>${t("Sceglilo nelle impostazioni dell'agente.")}</li>
           </ol>
-          <div class="row"><button class="btn" data-action="retry">${icons.refresh}Riprova</button><button class="btn ghost" data-action="settings">${icons.sliders}Impostazioni</button></div>
+          <div class="row"><button class="btn" data-action="retry">${icons.refresh}${t('Riprova')}</button><button class="btn ghost" data-action="settings">${icons.sliders}${t('Impostazioni')}</button></div>
         </details>
       </div>`
   }
@@ -227,28 +236,28 @@ export class AgentPanel {
     const d = this.download
     const note =
       d?.phase === 'error'
-        ? `<p class="error">${esc(d.error ?? 'Download non riuscito')}</p>`
+        ? `<p class="error">${esc(d.error ?? t('Download non riuscito'))}</p>`
         : d?.phase === 'paused'
-          ? `<p class="muted dl-note">${esc(d.error ?? 'Download in pausa.')}</p>`
+          ? `<p class="muted dl-note">${esc(d.error ?? t('Download in pausa.'))}</p>`
           : ''
     if (d && (d.phase === 'downloading' || d.phase === 'verifying')) {
       const pct = d.total ? (d.received / d.total) * 100 : 0
       const eta = d.speed && d.phase === 'downloading' ? ` · ${duration((d.total - d.received) / d.speed)}` : ''
       const meta =
         d.phase === 'verifying'
-          ? 'Verifico il file…'
-          : `${gb(d.received)} di ${gb(d.total)} GB${d.speed ? ` · ${(d.speed / 1e6).toFixed(1)} MB/s` : ''}${eta}`
+          ? t('Verifico il file…')
+          : `${t('{done} di {total} GB', { done: gb(d.received), total: gb(d.total) })}${d.speed ? ` · ${(d.speed / 1e6).toFixed(1)} MB/s` : ''}${eta}`
       return `<div class="dl">
           <div class="dl-bar"><i style="width:${pct.toFixed(1)}%"></i></div>
-          <div class="dl-meta"><span>${meta}</span>${d.phase === 'downloading' ? `<button class="link-btn" data-dl-cancel>Pausa</button>` : ''}</div>
+          <div class="dl-meta"><span>${meta}</span>${d.phase === 'downloading' ? `<button class="link-btn" data-dl-cancel>${t('Pausa')}</button>` : ''}</div>
         </div>`
     }
     if (installed && this.settings.provider !== 'builtin')
-      return `<button class="btn primary" data-use-builtin="${installed.id}">${icons.check}Usa il modello integrato (${esc(installed.label)})</button>${note}`
+      return `<button class="btn primary" data-use-builtin="${installed.id}">${icons.check}${t('Usa il modello integrato ({name})', { name: esc(installed.label) })}</button>${note}`
     if (!rec) return note
     const partial = rec.partial || (d?.id === rec.id ? d.received : 0)
     return `<button class="btn primary" data-dl="${rec.id}">${icons.download}${
-      partial ? `Riprendi il download (${gb(partial)} di ${gb(rec.size)} GB)` : `Scarica il modello consigliato (${gb(rec.size)} GB)`
+      partial ? t('Riprendi il download ({done} di {total} GB)', { done: gb(partial), total: gb(rec.size) }) : t('Scarica il modello consigliato ({size} GB)', { size: gb(rec.size) })
     }</button>${note}`
   }
 
@@ -256,7 +265,8 @@ export class AgentPanel {
     this.download = p
     if (p.phase === 'done') {
       this.download = null
-      void this.useBuiltin(p.id)
+      if (p.keep) void window.api.builtinModels().then((b) => ((this.builtin = b), this.paintBuiltinList()))
+      else void this.useBuiltin(p.id)
       return
     }
     // repaint only the download slot, so the rest of the card keeps its state
@@ -309,7 +319,7 @@ export class AgentPanel {
   private setRunning(v: boolean): void {
     this.running = v
     this.sendBtn.innerHTML = v ? icons.stop : icons.send
-    this.sendBtn.title = v ? 'Interrompi' : 'Invia (↵)'
+    this.sendBtn.title = v ? t('Interrompi') : `${t('Invia')} (↵)`
     this.sendBtn.classList.toggle('stop', v)
   }
 
@@ -330,7 +340,7 @@ export class AgentPanel {
           if (e.type === 'text') el.className = 'markdown answer'
           else {
             el.className = 'reasoning'
-            el.innerHTML = `<summary>Ragionamento</summary><div class="r-text"></div>`
+            el.innerHTML = `<summary>${t('Ragionamento')}</summary><div class="r-text"></div>`
           }
           this.append(el)
           seg = { kind: e.type, text: '', el } as Segment
@@ -364,7 +374,7 @@ export class AgentPanel {
 
   private finish(): void {
     this.stopLive()
-    if (this.message && !this.message.childElementCount) this.appendOther('notice', 'Nessuna risposta.')
+    if (this.message && !this.message.childElementCount) this.appendOther('notice', t('Nessuna risposta.'))
     for (const seg of this.renderQueued) this.renderSegment(seg)
     this.renderQueued.clear()
     this.setRunning(false)
@@ -404,7 +414,7 @@ export class AgentPanel {
     el.innerHTML = `<div class="st-row"><span class="st-glyph"></span><span class="st-text"></span><span class="st-meta"></span></div><div class="st-detail"></div>`
     this.message!.appendChild(el)
     const still = matchMedia('(prefers-reduced-motion: reduce)').matches
-    this.live = { el, timer: 0, started: performance.now(), phase: 'thinking', text: 'Elaboro la richiesta', tokens: 0, frame: 0, since: 0 }
+    this.live = { el, timer: 0, started: performance.now(), phase: 'thinking', text: t('Elaboro la richiesta'), tokens: 0, frame: 0, since: 0 }
     this.live.timer = window.setInterval(() => {
       if (this.live && !still) this.live.frame++
       this.paintLive()
@@ -439,7 +449,7 @@ export class AgentPanel {
       const seg = this.segments.slice(l.since).find((x) => x.kind === 'reasoning') as { text: string } | undefined
       detail = lastSentence(seg?.text ?? '')
     } else if (l.phase === 'thinking' && !l.tokens && performance.now() - l.started > SLOW_START_MS) {
-      detail = 'Il primo messaggio può essere lento: il modello si sta caricando in memoria.'
+      detail = t('Il primo messaggio può essere lento: il modello si sta caricando in memoria.')
     }
     l.el.dataset.phase = l.phase
     l.el.querySelector('.st-glyph')!.textContent = l.phase === 'awaiting' ? '✋' : GLYPHS[l.frame % GLYPHS.length]
@@ -497,15 +507,15 @@ export class AgentPanel {
     if (call.preview) {
       const p = call.preview
       html += `<div class="tool-preview">
-        <div class="tool-path"><span>${esc(p.path)}</span><em>${p.isNew ? 'nuova nota' : 'modifica'}</em></div>
+        <div class="tool-path"><span>${esc(p.path)}</span><em>${p.isNew ? t('nuova nota') : t('modifica')}</em></div>
         <pre class="diff">${diffHtml(p.diff)}</pre>
         ${
           call.status === 'awaiting'
-            ? `<div class="tool-approve"><button class="btn primary sm" data-approve="${call.id}">${icons.check}Approva</button><button class="btn sm" data-reject="${call.id}">Rifiuta</button></div>`
+            ? `<div class="tool-approve"><button class="btn primary sm" data-approve="${call.id}">${icons.check}${t('Approva')}</button><button class="btn sm" data-reject="${call.id}">${t('Rifiuta')}</button></div>`
             : call.change && !call.change.undone
-              ? `<div class="tool-approve"><button class="btn ghost sm" data-undo="${call.change.changeId}" data-undo-call="${call.id}">Annulla modifica</button></div>`
+              ? `<div class="tool-approve"><button class="btn ghost sm" data-undo="${call.change.changeId}" data-undo-call="${call.id}">${t('Annulla modifica')}</button></div>`
               : call.change?.undone
-                ? `<div class="tool-approve muted">Modifica annullata</div>`
+                ? `<div class="tool-approve muted">${t('Modifica annullata')}</div>`
                 : ''
         }
       </div>`
@@ -514,15 +524,15 @@ export class AgentPanel {
   }
 
   private onClick(e: MouseEvent): void {
-    const t = e.target as HTMLElement
-    const action = t.closest<HTMLElement>('[data-action]')?.dataset.action
+    const target = e.target as HTMLElement
+    const action = target.closest<HTMLElement>('[data-action]')?.dataset.action
     if (action === 'close') return this.toggle(false)
     if (action === 'settings') return this.showSettings(this.settingsEl.classList.contains('hidden'))
     if (action === 'retry') return void this.refreshStatus()
-    const dl = t.closest<HTMLElement>('[data-dl]')?.dataset.dl
+    const dl = target.closest<HTMLElement>('[data-dl]')?.dataset.dl
     if (dl) return void this.startDownload(dl)
-    if (t.closest('[data-dl-cancel]')) return void window.api.builtinCancel()
-    const use = t.closest<HTMLElement>('[data-use-builtin]')?.dataset.useBuiltin
+    if (target.closest('[data-dl-cancel]')) return void window.api.builtinCancel()
+    const use = target.closest<HTMLElement>('[data-use-builtin]')?.dataset.useBuiltin
     if (use) return void this.useBuiltin(use)
     if (action === 'new') {
       void window.api.agentReset()
@@ -536,31 +546,31 @@ export class AgentPanel {
       this.paintEmpty()
       return
     }
-    const sug = t.closest<HTMLElement>('.suggestion')
+    const sug = target.closest<HTMLElement>('.suggestion')
     if (sug) return this.submit(sug.textContent ?? '')
-    const node = t.closest<HTMLElement>('[data-node]')
+    const node = target.closest<HTMLElement>('[data-node]')
     if (node) {
       e.preventDefault()
       return this.host.openNote(node.dataset.node!)
     }
-    const file = t.closest<HTMLElement>('[data-file]')
+    const file = target.closest<HTMLElement>('[data-file]')
     if (file) {
       e.preventDefault()
       return void window.api.openFile(file.dataset.file!)
     }
-    const approve = t.closest<HTMLElement>('[data-approve]')?.dataset.approve
+    const approve = target.closest<HTMLElement>('[data-approve]')?.dataset.approve
     if (approve) return void window.api.agentApprove(approve, true)
-    const reject = t.closest<HTMLElement>('[data-reject]')?.dataset.reject
+    const reject = target.closest<HTMLElement>('[data-reject]')?.dataset.reject
     if (reject) return void window.api.agentApprove(reject, false)
-    const undoBtn = t.closest<HTMLElement>('[data-undo]')
+    const undoBtn = target.closest<HTMLElement>('[data-undo]')
     if (undoBtn) return void this.undo(undoBtn.dataset.undo!, undoBtn.dataset.undoCall!)
-    const focus = t.closest<HTMLElement>('[data-focus]')?.dataset.focus
+    const focus = target.closest<HTMLElement>('[data-focus]')?.dataset.focus
     if (focus) {
       const ids = this.tools.get(focus)?.call.ids
       if (ids?.length) this.host.focusNodes(ids)
     }
-    if (t.closest('[data-copy]')) void this.copyMcp()
-    if (t.closest('[data-index]')) void window.api.indexBuild()
+    if (target.closest('[data-copy]')) void this.copyMcp()
+    if (target.closest('[data-index]')) void window.api.indexBuild()
   }
 
   private async undo(changeId: string, callId: string): Promise<void> {
@@ -602,45 +612,45 @@ export class AgentPanel {
     const option = (v: string, label: string, sel: string): string => `<option value="${esc(v)}" ${v === sel ? 'selected' : ''}>${esc(label)}</option>`
     this.settingsEl.innerHTML = `
       <div class="set-scroll">
-        <h4>Modello</h4>
-        <label class="field"><span>Server</span>
-          <select data-k="provider">${PROVIDERS.map((p) => option(p.id, p.label, s.provider)).join('')}</select></label>
-        ${s.provider === 'builtin' ? '' : `<label class="field"><span>Indirizzo</span><input data-k="baseUrl" value="${esc(s.baseUrl)}" spellcheck="false" /></label>`}
+        <h4>${t('Modello')}</h4>
+        <label class="field"><span>${t('Server')}</span>
+          <select data-k="provider">${PROVIDERS.map((p) => option(p.id, t(p.label), s.provider)).join('')}</select></label>
+        ${s.provider === 'builtin' ? '' : `<label class="field"><span>${t('Indirizzo')}</span><input data-k="baseUrl" value="${esc(s.baseUrl)}" spellcheck="false" /></label>`}
         <div class="status-line ${this.status?.ok ? 'ok' : 'off'}">${
           this.status?.ok
             ? s.provider === 'builtin'
-              ? `Pronto · ${models.length} ${models.length === 1 ? 'modello scaricato' : 'modelli scaricati'}`
-              : `Collegato · ${models.length} modelli disponibili`
-            : esc(this.status?.error ?? 'Non collegato')
-        }<button class="link-btn" data-action="retry">Aggiorna</button></div>
+              ? models.length === 1 ? t('Pronto · 1 modello scaricato') : t('Pronto · {n} modelli scaricati', { n: models.length })
+              : t('Collegato · {n} modelli disponibili', { n: models.length })
+            : esc(this.status?.error ?? t('Non collegato'))
+        }<button class="link-btn" data-action="retry">${t('Aggiorna')}</button></div>
         ${s.provider === 'builtin' ? '<div class="builtin-list"></div>' : ''}
-        <label class="field"><span>Modello di chat</span>
-          <select data-k="model">${s.model && !chatModels.includes(s.model) ? option(s.model, s.model + ' (non trovato)', s.model) : ''}${
+        <label class="field"><span>${t('Modello di chat')}</span>
+          <select data-k="model">${s.model && !chatModels.includes(s.model) ? option(s.model, s.model + ` (${t('non trovato')})`, s.model) : ''}${
             chatModels.length ? chatModels.map((m) => option(m, this.modelLabel(m), s.model)).join('') : option('', '—', s.model)
           }</select></label>
-        <label class="field"><span>Contesto (token)</span><input data-k="numCtx" type="number" min="2048" step="1024" value="${s.numCtx}" /></label>
-        <label class="slider"><span>Temperatura<output>${s.temperature.toFixed(2)}</output></span>
+        <label class="field"><span>${t('Contesto (token)')}</span><input data-k="numCtx" type="number" min="2048" step="1024" value="${s.numCtx}" /></label>
+        <label class="slider"><span>${t('Temperatura')}<output>${s.temperature.toFixed(2)}</output></span>
           <input data-k="temperature" type="range" min="0" max="1.2" step="0.05" value="${s.temperature}" /></label>
-        <label class="toggle"><span>Ragionamento esteso (più lento)</span><input type="checkbox" data-k="think" ${s.think ? 'checked' : ''} /><i></i></label>
-        <label class="toggle"><span>Segui l'agente nella vista 3D</span><input type="checkbox" data-k="followAgent" ${s.followAgent ? 'checked' : ''} /><i></i></label>
-        <label class="toggle"><span>Applica le modifiche senza chiedere</span><input type="checkbox" data-k="autoApprove" ${s.autoApprove ? 'checked' : ''} /><i></i></label>
-        <p class="hint-text">Ogni modifica viene salvata con un backup e si può annullare dalla chat.</p>
+        <label class="toggle"><span>${t('Ragionamento esteso (più lento)')}</span><input type="checkbox" data-k="think" ${s.think ? 'checked' : ''} /><i></i></label>
+        <label class="toggle"><span>${t("Segui l'agente nella vista 3D")}</span><input type="checkbox" data-k="followAgent" ${s.followAgent ? 'checked' : ''} /><i></i></label>
+        <label class="toggle"><span>${t('Applica le modifiche senza chiedere')}</span><input type="checkbox" data-k="autoApprove" ${s.autoApprove ? 'checked' : ''} /><i></i></label>
+        <p class="hint-text">${t('Ogni modifica viene salvata con un backup e si può annullare dalla chat.')}</p>
 
-        <h4>Ricerca semantica</h4>
+        <h4>${t('Ricerca semantica')}</h4>
         ${
           s.provider === 'builtin'
-            ? `<p class="hint-text">Con il modello integrato la ricerca usa le parole chiave. Per cercare anche per significato usa Ollama con un modello di embedding.</p>`
-            : `<label class="field"><span>Modello di embedding</span>
-          <select data-k="embedModel">${option('', 'Nessuno (solo parole chiave)', s.embedModel)}${
+            ? `<p class="hint-text">${t('Con il modello integrato la ricerca usa le parole chiave. Per cercare anche per significato usa Ollama con un modello di embedding.')}</p>`
+            : `<label class="field"><span>${t('Modello di embedding')}</span>
+          <select data-k="embedModel">${option('', t('Nessuno (solo parole chiave)'), s.embedModel)}${
             s.embedModel && !embedModels.includes(s.embedModel) ? option(s.embedModel, s.embedModel, s.embedModel) : ''
           }${embedModels.map((m) => option(m, m, s.embedModel)).join('')}</select></label>
         <div class="index-status"></div>`
         }
 
-        <h4>Usa il vault da altre app (MCP)</h4>
-        <p class="hint-text">LM Studio, Claude Desktop e altri client MCP possono usare gli stessi strumenti dell'agente. Incolla questa configurazione nel loro file MCP:</p>
+        <h4>${t('Usa il vault da altre app (MCP)')}</h4>
+        <p class="hint-text">${t("LM Studio, Claude Desktop e altri client MCP possono usare gli stessi strumenti dell'agente. Incolla questa configurazione nel loro file MCP:")}</p>
         <pre class="mcp-config">…</pre>
-        <button class="btn ghost sm" data-copy>${icons.copy}Copia configurazione</button>
+        <button class="btn ghost sm" data-copy>${icons.copy}${t('Copia configurazione')}</button>
       </div>`
     this.settingsEl.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-k]').forEach((el) => {
       el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', () => this.onSetting(el))
@@ -663,14 +673,14 @@ export class AgentPanel {
       .map((m) => {
         const busy = d && d.id === m.id && (d.phase === 'downloading' || d.phase === 'verifying')
         const right = busy
-          ? `<span class="muted">${d.phase === 'verifying' ? 'verifico…' : `${Math.floor((d.received / (d.total || 1)) * 100)}%`}</span><button class="link-btn" data-dl-cancel>Pausa</button>`
+          ? `<span class="muted">${d.phase === 'verifying' ? t('verifico…') : `${Math.floor((d.received / (d.total || 1)) * 100)}%`}</span><button class="link-btn" data-dl-cancel>${t('Pausa')}</button>`
           : m.installed && m.vision
-            ? `<span class="muted">scaricato</span>`
+            ? `<span class="muted">${t('scaricato')}</span>`
             : m.installed
               ? // downloaded before the vision file existed: add it on its own
-                `<button class="link-btn" data-dl="${m.id}">Aggiungi la lettura delle immagini · ${gb(m.visionSize)} GB</button>`
-              : `<button class="link-btn" data-dl="${m.id}">${m.partial ? 'Riprendi' : 'Scarica'} · ${gb(m.size)} GB</button>`
-        return `<div class="builtin-row"><span>${esc(m.label)}${m.id === info.recommended ? ' <em>consigliato</em>' : ''}</span>${right}</div>`
+                `<button class="link-btn" data-dl="${m.id}">${t('Aggiungi la lettura delle immagini')} · ${gb(m.visionSize)} GB</button>`
+              : `<button class="link-btn" data-dl="${m.id}">${m.partial ? t('Riprendi') : t('Scarica')} · ${gb(m.size)} GB</button>`
+        return `<div class="builtin-row"><span>${esc(m.label)}${m.id === info.recommended ? ` <em>${t('consigliato')}</em>` : ''}</span>${right}</div>`
       })
       .join('')
   }
@@ -702,7 +712,7 @@ export class AgentPanel {
     if (!el) return
     const s = this.index
     if (!this.settings.embedModel) {
-      el.innerHTML = `<p class="hint-text">Senza un modello di embedding la ricerca usa le parole chiave. Per cercare anche per significato installa ad esempio <code>nomic-embed-text</code> in Ollama e sceglilo qui.</p>`
+      el.innerHTML = `<p class="hint-text">${t('Senza un modello di embedding la ricerca usa le parole chiave. Per cercare anche per significato installa ad esempio <code>nomic-embed-text</code> in Ollama e sceglilo qui.')}</p>`
       return
     }
     if (!s) return
@@ -711,11 +721,11 @@ export class AgentPanel {
       s.error
         ? esc(s.error)
         : s.running
-          ? `Indicizzazione… ${pct ?? 0}%`
+          ? t('Indicizzazione… {pct}%', { pct: pct ?? 0 })
           : s.indexed
-            ? `${s.indexed} / ${s.total} note indicizzate`
-            : 'Indice non ancora creato'
-    }</div>${s.running ? '' : `<button class="btn ghost sm" data-index>${icons.refresh}${s.indexed ? 'Aggiorna indice' : 'Crea indice'}</button>`}`
+            ? t('{done} / {total} note indicizzate', { done: s.indexed, total: s.total })
+            : t('Indice non ancora creato')
+    }</div>${s.running ? '' : `<button class="btn ghost sm" data-index>${icons.refresh}${s.indexed ? t('Aggiorna indice') : t('Crea indice')}</button>`}`
   }
 
   private async paintMcp(): Promise<void> {
@@ -737,7 +747,7 @@ export class AgentPanel {
       ta.remove()
     }
     const btn = this.settingsEl.querySelector('[data-copy]')
-    if (btn) btn.innerHTML = `${icons.check}Copiata`
+    if (btn) btn.innerHTML = `${icons.check}${t('Copiata')}`
   }
 
   /* ------------------------------------------------------------------ misc */
@@ -777,7 +787,7 @@ function setText(el: Element, text: string): void {
   if (el.textContent !== text) el.textContent = text
 }
 
-const gb = (bytes: number): string => (bytes / 1e9).toFixed(1).replace('.', ',')
+const gb = (bytes: number): string => (bytes / 1e9).toFixed(1).replace('.', getLang() === 'en' ? '.' : ',')
 
 function duration(secs: number): string {
   if (!isFinite(secs) || secs <= 0) return ''

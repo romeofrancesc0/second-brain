@@ -1,3 +1,4 @@
+import { getLang, t } from '@shared/i18n'
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat, statfs, writeFile } from 'node:fs/promises'
@@ -140,8 +141,8 @@ async function ensureSpace(dir: string, bytes: number): Promise<void> {
   if (!fs) return
   const free = fs.bavail * fs.bsize
   if (free < bytes + DISK_MARGIN) {
-    const fmt = (b: number): string => (b / GB).toFixed(1).replace('.', ',')
-    throw new Error(`Spazio su disco insufficiente: servono ${fmt(bytes + DISK_MARGIN)} GB liberi, ce ne sono ${fmt(free)}. Libera spazio e riprova.`)
+    const fmt = (b: number): string => (b / GB).toFixed(1).replace('.', getLang() === 'en' ? '.' : ',')
+    throw new Error(t('Spazio su disco insufficiente: servono {need} GB liberi, ce ne sono {free}. Libera spazio e riprova.', { need: fmt(bytes + DISK_MARGIN), free: fmt(free) }))
   }
 }
 
@@ -180,7 +181,7 @@ export async function downloadModel(
   signal: AbortSignal
 ): Promise<string> {
   const m = catalogModel(id)
-  if (!m) throw new Error(`Modello sconosciuto: ${id}`)
+  if (!m) throw new Error(t('Modello sconosciuto: {id}', { id }))
   const dir = modelsDir(dataDir)
   await mkdir(dir, { recursive: true })
   const files = [m, m.vision]
@@ -224,7 +225,7 @@ async function downloadFile(
 
   if (have < f.size) {
     const res = await fetch(f.url, { headers: have ? { range: `bytes=${have}-` } : {}, signal })
-    if (!res.ok || !res.body) throw new Error(`Download non riuscito (HTTP ${res.status})`)
+    if (!res.ok || !res.body) throw new Error(t('Download non riuscito (HTTP {status})', { status: res.status }))
     if (have && res.status !== 206) {
       // the server ignored the range: start over
       have = 0
@@ -255,13 +256,13 @@ async function downloadFile(
     } finally {
       await new Promise<void>((r) => out.end(() => r()))
     }
-    if (received !== f.size) throw new Error('Download incompleto: riprova per riprendere da dove si è fermato.')
+    if (received !== f.size) throw new Error(t('Download incompleto: riprova per riprendere da dove si è fermato.'))
   }
 
   progress(f.size, 'verifying')
   if (hash.digest('hex') !== f.sha256) {
     await rm(part, { force: true })
-    throw new Error('Il file scaricato è danneggiato (checksum diverso). Riprova il download.')
+    throw new Error(t('Il file scaricato è danneggiato (checksum diverso). Riprova il download.'))
   }
   await rename(part, final)
   await markVerified(final, f)

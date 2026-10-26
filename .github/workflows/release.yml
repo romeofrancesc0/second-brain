@@ -1,7 +1,10 @@
 name: Release
 
 # Push a tag like v0.2.0 (after bumping "version" in package.json) to build
-# the installers and publish them as a GitHub Release.
+# the installers and publish them as a GitHub Release, here and in the public
+# romeofrancesc0/second-brain-releases repository the website downloads from.
+# Run it by hand (workflow_dispatch) to build the installers without publishing:
+# they are kept as artifacts of the run.
 on:
   push:
     tags: ['v*']

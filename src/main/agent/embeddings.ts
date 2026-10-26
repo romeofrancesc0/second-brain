@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
@@ -87,7 +88,7 @@ export class EmbeddingIndex {
     let dim = keep?.dim ?? 0
     const batch = 16
     for (let i = 0; i < todo.length; i += batch) {
-      if (signal?.aborted) throw new Error('Indicizzazione annullata')
+      if (signal?.aborted) throw new Error(t('Indicizzazione annullata'))
       const slice = todo.slice(i, i + batch)
       const vectors = await embed(slice.map(embeddingText))
       vectors.forEach((v, k) => {

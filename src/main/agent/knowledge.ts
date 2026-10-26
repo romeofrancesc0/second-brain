@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { posix } from 'node:path'
 import type { GraphNode } from '@shared/types'
 import type { NoteText, VaultScan } from '../vault'
@@ -134,7 +135,7 @@ export class VaultKnowledge {
       .split('|')[0]
       .split('#')[0]
       .trim()
-    if (!raw) return { error: 'Riferimento vuoto', suggestions: [] }
+    if (!raw) return { error: t('Riferimento vuoto'), suggestions: [] }
     const asPath = raw.endsWith('.md') ? raw : raw + '.md'
     if (this.notes.has(raw)) return { id: raw }
     if (this.notes.has(asPath)) return { id: asPath }
@@ -143,7 +144,7 @@ export class VaultKnowledge {
     const byTitle = this.byTitle.get(normalize(posix.basename(raw, '.md')))
     if (byTitle?.length) return { id: byTitle[0] }
     const suggestions = this.search(raw, { limit: 5 }).map((h) => h.title)
-    return { error: `Nota "${raw}" non trovata`, suggestions }
+    return { error: t('Nota "{note}" non trovata', { note: raw }), suggestions }
   }
 
   title(id: string): string {

@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import type { GraphNode } from '@shared/types'
 import { icons } from './icons'
 
@@ -26,7 +27,7 @@ export class SearchPalette {
   constructor(private root: HTMLElement) {
     root.innerHTML = `
       <div class="palette glass">
-        <div class="palette-input">${icons.search}<input type="text" placeholder="Cerca tra i neuroni, i corsi, i tag…" spellcheck="false" /><kbd>esc</kbd></div>
+        <div class="palette-input">${icons.search}<input type="text" placeholder="${t('Cerca tra i neuroni, i corsi, i tag…')}" spellcheck="false" /><kbd>esc</kbd></div>
         <ul class="palette-results"></ul>
         <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> naviga</span><span><kbd>↵</kbd> vola al neurone</span></div>
       </div>`
@@ -113,13 +114,13 @@ export class SearchPalette {
 
   private render(): void {
     if (!this.results.length) {
-      this.list.innerHTML = `<li class="empty">Nessun neurone trovato</li>`
+      this.list.innerHTML = `<li class="empty">${t('Nessun neurone trovato')}</li>`
       return
     }
     this.list.innerHTML = this.results
       .map((e, i) => {
         const n = e.node
-        const sub = n.kind === 'attachment' ? 'Fonte · ' + n.group : n.kind === 'moc' ? 'Mappa dei contenuti' : n.group
+        const sub = n.kind === 'attachment' ? t('Fonte') + ' · ' + n.group : n.kind === 'moc' ? t('Mappa dei contenuti') : n.group
         return `<li data-i="${i}"><i style="--c:${this.colorOf(n)}"></i><span class="r-title">${esc(n.title)}</span><span class="r-sub">${esc(sub)}</span></li>`
       })
       .join('')

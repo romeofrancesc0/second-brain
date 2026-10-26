@@ -1,6 +1,7 @@
 import { Marked, type TokenizerAndRendererExtension, type Tokens } from 'marked'
 import markedKatex from 'marked-katex-extension'
 import DOMPurify from 'dompurify'
+import { t as tr } from '@shared/i18n'
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i
 
@@ -44,7 +45,7 @@ const wikilink: TokenizerAndRendererExtension = {
     const id = currentLinks[key]
     const heading = t.target.includes('#') ? t.target.slice(t.target.indexOf('#') + 1) : ''
     const label = escapeHtml(t.alias || (key ? key.split('/').pop()!.replace(/\.md$/i, '') : heading) + (heading && !t.alias && key ? ' › ' + heading : ''))
-    if (!id || id.startsWith('unresolved:')) return `<span class="wikilink unresolved" title="Nota non ancora creata">${label}</span>`
+    if (!id || id.startsWith('unresolved:')) return `<span class="wikilink unresolved" title="${tr('Nota non ancora creata')}">${label}</span>`
     if (!id.endsWith('.md')) {
       if (t.embed && IMAGE_EXT.test(id)) return `<img class="embed" src="${vaultUrl(id)}" alt="${label}" loading="lazy" />`
       return `<a class="wikilink file" data-file="${escapeHtml(id)}" title="${escapeHtml(id)}">${label}</a>`

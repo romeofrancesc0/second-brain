@@ -1,5 +1,6 @@
 import { app, ipcMain, shell, type BrowserWindow } from 'electron'
 import { join } from 'node:path'
+import { t } from '@shared/i18n'
 import { DEFAULT_AI, type AgentEvent, type AiSettings, type AppMode, type AiStatus, type IndexStatus, type McpInfo, type ModelDownloadProgress } from '@shared/types'
 import { AgentSession } from './agent/agent'
 import { disposeBuiltin } from './agent/builtin'
@@ -147,9 +148,9 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
   ipcMain.handle('agent:reset', () => session.reset())
   ipcMain.handle('agent:approve', (_e, callId: string, ok: boolean) => session.approve(callId, ok))
   ipcMain.handle('agent:undo', async (_e, changeId: string) => {
-    if (eco()) return { ok: false, message: 'In modalità Eco l’agente non modifica il vault: passa a Basic per annullare.' }
+    if (eco()) return { ok: false, message: t('In modalità Eco l’agente non modifica il vault: passa a Basic per annullare.') }
     const vault = deps.vault()
-    if (!vault) return { ok: false, message: 'Nessun vault aperto' }
+    if (!vault) return { ok: false, message: t('Nessun vault aperto') }
     try {
       const res = await undoChange(dataDir, vault, changeId, (abs) => shell.trashItem(abs))
       await deps.rescan()
@@ -170,16 +171,21 @@ export function registerAgent(deps: AgentDeps): { onScan(k: VaultKnowledge): voi
   })
   let download: AbortController | null = null
   ipcMain.handle('builtin:models', () => modelInfo(dataDir))
-  ipcMain.handle('builtin:download', async (_e, id: string) => {
-    if (download) return { ok: false, error: 'Un download è già in corso.' }
+  ipcMain.handle('builtin:download', async (_e, ids: string | string[]) => {
+    if (download) return { ok: false, error: t('Un download è già in corso.') }
     download = new AbortController()
+    let current = Array.isArray(ids) ? ids[0] : ids
     try {
-      await downloadModel(dataDir, id, (p) => send('builtin:progress', p), download.signal)
+      // one model after the other: each reports its own progress and "done"
+      for (const [i, id] of (Array.isArray(ids) ? ids : [ids]).entries()) {
+        current = id
+        await downloadModel(dataDir, id, (p) => send('builtin:progress', i ? { ...p, keep: true } : p), download.signal)
+      }
       return { ok: true }
     } catch (err) {
       const paused = download.signal.aborted
-      const error = paused ? 'Download in pausa: riprendi quando vuoi.' : err instanceof Error ? err.message : String(err)
-      send('builtin:progress', { id, received: 0, total: 0, phase: paused ? 'paused' : 'error', error } satisfies ModelDownloadProgress)
+      const error = paused ? t('Download in pausa: riprendi quando vuoi.') : err instanceof Error ? err.message : String(err)
+      send('builtin:progress', { id: current, received: 0, total: 0, phase: paused ? 'paused' : 'error', error } satisfies ModelDownloadProgress)
       return { ok: false, error }
     } finally {
       download = null

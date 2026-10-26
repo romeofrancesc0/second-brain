@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { Color } from 'three'
 
 // Muted, mid-luminance colours: distinguishable clusters without a neon look.
@@ -27,7 +28,7 @@ const CURATED = [
 export function buildPalette(groupsBySize: string[]): Map<string, Color> {
   const map = new Map<string, Color>()
   groupsBySize.forEach((g, i) => {
-    if (g === 'Non risolti') map.set(g, new Color('#7d8293'))
+    if (g === t('Non risolti')) map.set(g, new Color('#7d8293'))
     else if (i < CURATED.length) map.set(g, new Color(CURATED[i]))
     else map.set(g, new Color().setHSL(((i * 137.508) % 360) / 360, 0.38, 0.64))
   })

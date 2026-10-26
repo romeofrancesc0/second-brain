@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { createWriteStream, existsSync, mkdirSync, type WriteStream } from 'node:fs'
@@ -85,7 +86,7 @@ export function ensureServer(cfg: ServerConfig, logDir: string): Promise<Running
 
 async function start(cfg: ServerConfig, logDir: string): Promise<RunningServer> {
   const bin = serverBinary()
-  if (!existsSync(bin)) throw new ServerError(`Il motore del modello integrato non è installato (${bin}).`, '')
+  if (!existsSync(bin)) throw new ServerError(t('Il motore del modello integrato non è installato ({path}).', { path: bin }), '')
   const port = await freePort()
   const apiKey = randomBytes(24).toString('hex')
   const args = [
@@ -135,16 +136,20 @@ async function start(cfg: ServerConfig, logDir: string): Promise<RunningServer> 
     await new Promise((r) => setTimeout(r, 250))
   }
   child.kill()
-  throw new ServerError('Il modello integrato non è partito in tempo.', tail)
+  throw new ServerError(t('Il modello integrato non è partito in tempo.'), tail)
 }
 
-/** A short reason in Italian from the server's output; the full log stays in the data folder. */
+const NO_MEMORY = 'Memoria insufficiente per il modello integrato. Chiudi le app che stanno usando un altro modello (Ollama, LM Studio…) o molta memoria, poi riprova.'
+
+/** Whether a reason from explain() is the out-of-memory one. */
+export const isMemoryError = (reason: string): boolean => reason === t(NO_MEMORY)
+
+/** A short reason, in the app language, from the server's output; the full log stays in the data folder. */
 export function explain(log: string): string {
-  if (/out of memory|failed to allocate|insufficient memory|OutOfDeviceMemory|unable to allocate/i.test(log))
-    return 'Memoria insufficiente per il modello integrato. Chiudi le app che stanno usando un altro modello (Ollama, LM Studio…) o molta memoria, poi riprova.'
-  if (/failed to load model|invalid magic|gguf_init|error loading model/i.test(log)) return 'Il file del modello non si apre: scaricalo di nuovo dalle impostazioni dell\'agente.'
-  if (/address already in use|couldn't bind/i.test(log)) return 'Il modello integrato non riesce ad aprire una porta locale: riprova.'
-  return 'Il modello integrato si è fermato.'
+  if (/out of memory|failed to allocate|insufficient memory|OutOfDeviceMemory|unable to allocate/i.test(log)) return t(NO_MEMORY)
+  if (/failed to load model|invalid magic|gguf_init|error loading model/i.test(log)) return t("Il file del modello non si apre: scaricalo di nuovo dalle impostazioni dell'agente.")
+  if (/address already in use|couldn't bind/i.test(log)) return t('Il modello integrato non riesce ad aprire una porta locale: riprova.')
+  return t('Il modello integrato si è fermato.')
 }
 
 /** The last lines the server wrote: they explain a request that failed because it stopped. */

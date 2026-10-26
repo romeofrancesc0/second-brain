@@ -1,3 +1,4 @@
+import { t, type Lang } from './i18n'
 export type NodeKind = 'note' | 'moc' | 'attachment' | 'unresolved'
 
 export interface GraphNode {
@@ -128,18 +129,24 @@ export const MODES: ModeInfo[] = [
   {
     id: 'basic',
     label: 'Basic',
-    summary: 'Tutta l’app: grafica come nelle Impostazioni e agente completo.',
+    get summary() {
+      return t('Tutta l’app: grafica come nelle Impostazioni e agente completo.')
+    },
     limits: []
   },
   {
     id: 'eco',
     label: 'Eco',
-    summary: 'Consumo minimo, per tenere il computer fresco e silenzioso.',
-    limits: [
-      'Grafica a 30 fps al massimo, a risoluzione normale invece che Retina, senza bagliore, grana e profondità di campo, con meno atmosfera.',
-      'Agente in sola lettura: cerca e legge le note, ma non crea, modifica o sposta nulla.',
-      'Niente immagini: l’agente non guarda le immagini delle note.'
-    ]
+    get summary() {
+      return t('Consumo minimo, per tenere il computer fresco e silenzioso.')
+    },
+    get limits() {
+      return [
+        t('Grafica a 30 fps al massimo, a risoluzione normale invece che Retina, senza bagliore, grana e profondità di campo, con meno atmosfera.'),
+        t('Agente in sola lettura: cerca e legge le note, ma non crea, modifica o sposta nulla.'),
+        t('Niente immagini: l’agente non guarda le immagini delle note.')
+      ]
+    }
   }
 ]
 
@@ -201,6 +208,8 @@ export interface ModelDownloadProgress {
   /** Bytes per second. */
   speed?: number
   error?: string
+  /** Part of a queue, not the first model: finishing it must not change the model in use. */
+  keep?: boolean
 }
 
 export interface DiffLine {
@@ -252,7 +261,26 @@ export interface McpInfo {
   args: string[]
 }
 
+/** What the first-run wizard needs to know. */
+export interface SetupInfo {
+  /** No vault opened yet and the wizard never completed: show it. */
+  first: boolean
+  /** Where the demo vault goes unless the user picks another folder. */
+  defaultFolder: string
+}
+
 export interface SecondBrainApi {
+  getLanguage(): Promise<Lang>
+  /** Saves the language; the renderer reloads to apply it. */
+  setLanguage(lang: Lang): Promise<void>
+  setupInfo(): Promise<SetupInfo>
+  setupFinish(): Promise<void>
+  /** Opens the licenses of the third-party software and models. */
+  openNotices(): Promise<void>
+  /** Asks for a folder. */
+  chooseFolder(title: string): Promise<string | null>
+  /** Copies the bundled demo vault into a new folder inside `parent` and returns its path. */
+  installDemo(parent: string): Promise<string>
   getKnownVaults(): Promise<KnownVault[]>
   getLastVault(): Promise<string | null>
   chooseVault(): Promise<string | null>
@@ -285,8 +313,8 @@ export interface SecondBrainApi {
   onIndexStatus(cb: (s: IndexStatus) => void): () => void
   mcpInfo(): Promise<McpInfo>
   builtinModels(): Promise<BuiltinModelInfo>
-  /** Downloads a model for the built-in provider (resumes a partial download). */
-  builtinDownload(id: string): Promise<{ ok: boolean; error?: string }>
+  /** Downloads models for the built-in provider, one after the other (resumes partial downloads). */
+  builtinDownload(ids: string | string[]): Promise<{ ok: boolean; error?: string }>
   builtinCancel(): Promise<void>
   onBuiltinProgress(cb: (p: ModelDownloadProgress) => void): () => void
 }

@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import type { AgentEvent, AgentToolCall, AiSettings } from '@shared/types'
 import type { VaultKnowledge } from './knowledge'
 import { createClient, extractInlineToolCalls, ModelError, type ChatMessage, type ChatResult, type ToolCall } from './llm'
@@ -62,8 +63,8 @@ export class AgentSession {
     const s = this.host.settings()
     const base = this.host.context()
     emit({ type: 'start' })
-    if (!base) return emit({ type: 'error', message: 'Apri prima un vault.' })
-    if (!s.model) return emit({ type: 'error', message: "Scegli un modello nelle impostazioni dell'agente." })
+    if (!base) return emit({ type: 'error', message: t('Apri prima un vault.') })
+    if (!s.model) return emit({ type: 'error', message: t("Scegli un modello nelle impostazioni dell'agente.") })
 
     this.running = true
     this.abort = new AbortController()
@@ -88,9 +89,9 @@ export class AgentSession {
         const enter = (p: 'reasoning' | 'writing'): void => {
           if (phase === p) return
           phase = p
-          emit({ type: 'status', phase: p, text: p === 'reasoning' ? 'Sto ragionando' : 'Scrivo la risposta' })
+          emit({ type: 'status', phase: p, text: p === 'reasoning' ? t('Sto ragionando') : t('Scrivo la risposta') })
         }
-        emit({ type: 'status', phase: 'thinking', text: step === 0 ? 'Elaboro la richiesta' : 'Valuto i risultati' })
+        emit({ type: 'status', phase: 'thinking', text: step === 0 ? t('Elaboro la richiesta') : t('Valuto i risultati') })
         try {
           res = await client.chat({
             model: s.model,
@@ -114,7 +115,7 @@ export class AgentSession {
         } catch (err) {
           if (err instanceof ModelError && err.code === 'no-think' && think) {
             think = false
-            emit({ type: 'notice', message: 'Questo modello non supporta il ragionamento esteso: lo disattivo.' })
+            emit({ type: 'notice', message: t('Questo modello non supporta il ragionamento esteso: lo disattivo.') })
             step--
             continue
           }
@@ -122,7 +123,7 @@ export class AgentSession {
             useTools = false
             emit({
               type: 'notice',
-              message: 'Il modello scelto non supporta gli strumenti: cerco io le note pertinenti e gliele passo, ma non potrà modificare il vault.'
+              message: t('Il modello scelto non supporta gli strumenti: cerco io le note pertinenti e gliele passo, ma non potrà modificare il vault.')
             })
             this.injectContext(base.knowledge(), text, `${run}-ctx`)
             step--
@@ -149,7 +150,7 @@ export class AgentSession {
           if (seen.has(key)) {
             this.history.push({
               role: 'tool',
-              content: 'Hai già fatto questa stessa chiamata e il risultato non cambia. Usa i risultati che hai, prova un altro strumento o rispondi.',
+              content: t('Hai già fatto questa stessa chiamata e il risultato non cambia. Usa i risultati che hai, prova un altro strumento o rispondi.'),
               toolCallId: call.id,
               toolName: call.name
             })
@@ -159,9 +160,9 @@ export class AgentSession {
           const result = await this.runTool(call, `${run}-${step}-${i}`, base, s, signal)
           this.history.push({ role: 'tool', content: result.content, toolCallId: call.id, toolName: call.name })
           // tool messages cannot carry pictures: they follow as a user message
-          if (result.images?.length) this.history.push({ role: 'user', content: `Immagine richiesta con ${call.name}:`, images: result.images })
+          if (result.images?.length) this.history.push({ role: 'user', content: t('Immagine richiesta con {tool}:', { tool: call.name }), images: result.images })
         }
-        if (step === MAX_STEPS - 1) emit({ type: 'notice', message: 'Raggiunto il numero massimo di passi per questa risposta.' })
+        if (step === MAX_STEPS - 1) emit({ type: 'notice', message: t('Raggiunto il numero massimo di passi per questa risposta.') })
       }
       emit({ type: 'done' })
     } catch (err) {
@@ -180,7 +181,7 @@ export class AgentSession {
     for (const m of this.history) {
       if (!m.images?.length) continue
       delete m.images
-      m.content += ' (immagine già esaminata, non più allegata: se serve, guardala di nuovo con view_image)'
+      m.content += ` (${t('immagine già esaminata, non più allegata: se serve, guardala di nuovo con view_image')})`
     }
   }
 
@@ -190,7 +191,7 @@ export class AgentSession {
     if (!last?.toolCalls?.length) return
     const answered = new Set(this.history.filter((m) => m.role === 'tool').map((m) => m.toolCallId))
     for (const c of last.toolCalls) {
-      if (!answered.has(c.id)) this.history.push({ role: 'tool', content: 'Interrotto dall’utente.', toolCallId: c.id, toolName: c.name })
+      if (!answered.has(c.id)) this.history.push({ role: 'tool', content: t('Interrotto dall’utente.'), toolCallId: c.id, toolName: c.name })
     }
   }
 
@@ -202,21 +203,21 @@ export class AgentSession {
     signal: AbortSignal
   ): Promise<ToolResult> {
     const emit = this.host.emit
-    const def = TOOLS.find((t) => t.name === call.name)
+    const def = TOOLS.find((x) => x.name === call.name)
     const ui: AgentToolCall = { id: uiId, name: call.name, label: def ? def.label(call.args) : call.name, args: call.args, status: 'running' }
     emit({ type: 'tool', call: { ...ui } })
-    emit({ type: 'status', phase: 'tool', text: def ? def.activity(call.args) : `Uso ${call.name}` })
+    emit({ type: 'status', phase: 'tool', text: def ? def.activity(call.args) : t('Uso {tool}', { tool: call.name }) })
 
     const fail = (message: string): ToolResult => {
       ui.status = 'error'
       ui.summary = message
       emit({ type: 'tool', call: { ...ui } })
-      return { content: `Errore: ${message}`, summary: message, ids: [] }
+      return { content: `${t('Errore')}: ${message}`, summary: message, ids: [] }
     }
-    if (!def) return fail(`strumento sconosciuto "${call.name}". Disponibili: ${TOOLS.map((t) => t.name).join(', ')}`)
-    if (def.write && this.eco()) return fail('in modalità Eco l’agente è in sola lettura')
-    if (def.write && this.host.readOnly) return fail('il vault è in sola lettura')
-    if (def.vision && this.eco()) return fail('in modalità Eco l’agente non guarda le immagini')
+    if (!def) return fail(t('strumento sconosciuto "{tool}". Disponibili: {list}', { tool: call.name, list: TOOLS.map((x) => x.name).join(', ') }))
+    if (def.write && this.eco()) return fail(t('in modalità Eco l’agente è in sola lettura'))
+    if (def.write && this.host.readOnly) return fail(t('il vault è in sola lettura'))
+    if (def.vision && this.eco()) return fail(t('in modalità Eco l’agente non guarda le immagini'))
 
     const ctx: ToolContext = {
       ...base,
@@ -228,7 +229,7 @@ export class AgentSession {
         }
         ui.status = 'awaiting'
         emit({ type: 'tool', call: { ...ui } })
-        emit({ type: 'status', phase: 'awaiting', text: 'Aspetto la tua approvazione' })
+        emit({ type: 'status', phase: 'awaiting', text: t('Aspetto la tua approvazione') })
         emit({ type: 'activity', ids: [req.id], mode: 'write' })
         const ok = await new Promise<boolean>((resolve) => {
           this.approvals.set(uiId, resolve)
@@ -237,7 +238,7 @@ export class AgentSession {
         this.approvals.delete(uiId)
         ui.status = ok ? 'running' : 'rejected'
         emit({ type: 'tool', call: { ...ui } })
-        if (ok) emit({ type: 'status', phase: 'tool', text: 'Salvo la modifica' })
+        if (ok) emit({ type: 'status', phase: 'tool', text: t('Salvo la modifica') })
         return ok
       }
     }
@@ -245,8 +246,8 @@ export class AgentSession {
       const r = await def.run(call.args, ctx)
       // refused because Eco was switched on while it waited, not by the user: say so to the model and in the UI
       if (r.rejected && this.eco()) {
-        r.content = 'Modifica non fatta: l’app è passata in modalità Eco, dove l’agente è in sola lettura. Dillo all’utente.'
-        r.summary = 'Non fatta: modalità Eco'
+        r.content = t('Modifica non fatta: l’app è passata in modalità Eco, dove l’agente è in sola lettura. Dillo all’utente.')
+        r.summary = t('Non fatta: modalità Eco')
       }
       ui.status = r.rejected ? 'rejected' : 'done'
       ui.summary = r.summary
@@ -278,6 +279,6 @@ export class AgentSession {
       .map((h) => `### [[${h.title}]]${h.corso ? ` (${h.corso})` : ''}\n${(k.notes.get(h.id)?.body ?? '').slice(0, 1800)}`)
       .join('\n\n')
     const last = this.history[this.history.length - 1]
-    last.content = `${question}\n\n---\nNote del vault che potrebbero essere pertinenti:\n\n${context || '(nessuna)'}`
+    last.content = `${question}\n\n---\n${t('Note del vault che potrebbero essere pertinenti')}:\n\n${context || `(${t('nessuna')})`}`
   }
 }

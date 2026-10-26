@@ -29,10 +29,16 @@
 - **Settings window** (⌘,) with sections: Theme, Graph, Navigation, Vault, AI agent, Shortcuts; accent colour.
 - Light/dark interface, bottom bar with zoom and overview.
 
+## ✅ v0.4 — Built-in agent and first public release
+
+- **Built-in model**: llama.cpp inside the app, Qwen 3.5 4B / 9B downloaded on request, with image reading; Basic and Eco modes.
+- **First-run setup**: language, which model to download (4B, 9B or both, in the background), demo vault in a folder of your choice.
+- **English and Italian** interface, selectable in Settings; the agent answers in the language you write in.
+- Public downloads for macOS and Windows from the website.
+
 ## 🔜 Next
 
-- **Public releases**: signed and notarized builds, auto-update, a project website with a download button.
-- **Interface translations**: the UI is currently in Italian; add English (and make the language selectable).
+- **Signed builds and auto-update**: Apple Developer ID and notarization, Windows code signing, updates inside the app.
 - **Saved conversations**: chat history, resume past conversations.
 - **Highlighting from the MCP server**: when an external app reads or edits notes via MCP, the neurons light up in the 3D view too (today only the graph update is visible).
 - **Inbox processing**: a command that makes the agent process the files in `Inbox/` following the vault's `CLAUDE.md` workflow (create neurons, move sources), with a final review.

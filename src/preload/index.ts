@@ -8,6 +8,13 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const api: SecondBrainApi = {
+  getLanguage: () => ipcRenderer.invoke('lang:get'),
+  setLanguage: (lang) => ipcRenderer.invoke('lang:set', lang),
+  setupInfo: () => ipcRenderer.invoke('setup:info'),
+  setupFinish: () => ipcRenderer.invoke('setup:finish'),
+  openNotices: () => ipcRenderer.invoke('shell:notices'),
+  chooseFolder: (title) => ipcRenderer.invoke('folder:choose', title),
+  installDemo: (parent) => ipcRenderer.invoke('setup:demo', parent),
   getKnownVaults: () => ipcRenderer.invoke('vaults:known'),
   getLastVault: () => ipcRenderer.invoke('vaults:last'),
   chooseVault: () => ipcRenderer.invoke('vaults:choose'),
@@ -38,7 +45,7 @@ const api: SecondBrainApi = {
   onIndexStatus: (cb) => subscribe<IndexStatus>('index:status', cb),
   mcpInfo: () => ipcRenderer.invoke('mcp:info'),
   builtinModels: () => ipcRenderer.invoke('builtin:models'),
-  builtinDownload: (id) => ipcRenderer.invoke('builtin:download', id),
+  builtinDownload: (ids) => ipcRenderer.invoke('builtin:download', ids),
   builtinCancel: () => ipcRenderer.invoke('builtin:cancel'),
   onBuiltinProgress: (cb) => subscribe<ModelDownloadProgress>('builtin:progress', cb)
 }

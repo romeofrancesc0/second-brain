@@ -17,8 +17,9 @@ const TARGETS = {
 const root = path.join(__dirname, '..', 'resources', 'llama')
 const cache = path.join(root, '.cache')
 
-/** The server and the libraries it loads; the other tools in the archive are left out. */
+/** The server, the libraries it loads and its license; the other tools in the archive are left out. */
 function wanted(target, name) {
+  if (name.startsWith('LICENSE')) return true
   if (target.startsWith('mac')) return name === 'llama-server' || name === 'libllama-server-impl.dylib' || /^lib[\w-]+\.0\.dylib$/.test(name)
   if (name === 'llama-server.exe' || name === 'llama-server-impl.dll') return true
   return name.endsWith('.dll') && !name.endsWith('-impl.dll')
@@ -64,6 +65,8 @@ async function fetchTarget(target) {
     fs.copyFileSync(fs.realpathSync(path.join(dir, name)), path.join(dest, name))
     n++
   }
+  // the Windows archive has no llama.cpp license of its own: use the copy kept in the repository
+  if (!fs.existsSync(path.join(dest, 'LICENSE'))) fs.copyFileSync(path.join(__dirname, '..', 'resources', 'licenses', 'llama.cpp-LICENSE'), path.join(dest, 'LICENSE'))
   if (target.startsWith('mac')) fs.chmodSync(path.join(dest, 'llama-server'), 0o755)
   fs.writeFileSync(stamp, RELEASE + '\n')
   fs.rmSync(tmp, { recursive: true, force: true })

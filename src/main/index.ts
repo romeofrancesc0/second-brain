@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron'
+import { getLang, langFromLocale, setLang, t, type Lang } from '@shared/i18n'
 import { createHash } from 'node:crypto'
 import { existsSync, promises as fs, watch, type FSWatcher } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -33,6 +34,9 @@ interface Config {
   settingsVersion?: number
   ai?: Partial<AiSettings>
   mode?: AppMode
+  language?: Lang
+  /** The first-run wizard was completed or skipped. */
+  setupDone?: boolean
 }
 
 const modeOf = (m: unknown): AppMode => (MODES.some((x) => x.id === m) ? (m as AppMode) : DEFAULT_MODE)
@@ -62,6 +66,12 @@ function updateConfig(patch: Partial<Config>): Promise<void> {
   })
   configQueue = run.catch(() => undefined)
   return run
+}
+
+/** The saved language, or the system's when the user never chose one. */
+async function getConfiguredLang(): Promise<Lang> {
+  const cfg = await readJson<Config>(configPath(), {})
+  return cfg.language ?? langFromLocale(app.getLocale())
 }
 
 async function knownVaults(): Promise<KnownVault[]> {
@@ -116,6 +126,21 @@ async function rescanNow(): Promise<void> {
   mainWindow?.webContents.send('vault:changed', graph)
 }
 
+/** The demo vault shipped with the app: in the resources once packaged, under resources/ in development. */
+function demoVaultSource(lang: Lang): string {
+  const packaged = join(process.resourcesPath ?? '', 'demo-vault', lang)
+  return existsSync(packaged) ? packaged : join(app.getAppPath(), 'resources', 'demo-vault', lang)
+}
+
+/** Copies the demo vault into a folder of its own inside `parent`, never over an existing one. */
+async function installDemoVault(parent: string, lang: Lang): Promise<string> {
+  const name = t('Second Brain - Demo')
+  let dest = join(parent, name)
+  for (let n = 2; existsSync(dest); n++) dest = join(parent, `${name} ${n}`)
+  await fs.cp(demoVaultSource(lang), dest, { recursive: true, errorOnExist: true })
+  return dest
+}
+
 function registerIpc(): void {
   agent = registerAgent({
     window: () => mainWindow,
@@ -126,6 +151,25 @@ function registerIpc(): void {
     saveAi: (ai) => updateConfig({ ai }),
     loadMode: async () => modeOf((await readJson<Config>(configPath(), {})).mode)
   })
+  ipcMain.handle('lang:get', async () => getConfiguredLang())
+  ipcMain.handle('lang:set', async (_e, lang: Lang) => {
+    setLang(lang)
+    await updateConfig({ language: lang })
+  })
+  ipcMain.handle('setup:info', async () => {
+    const cfg = await readJson<Config>(configPath(), {})
+    return { first: !cfg.setupDone && !cfg.lastVault, defaultFolder: app.getPath('documents') }
+  })
+  ipcMain.handle('setup:finish', () => updateConfig({ setupDone: true }))
+  ipcMain.handle('folder:choose', async (_e, title: string) => {
+    const res = await dialog.showOpenDialog(mainWindow!, { title, properties: ['openDirectory', 'createDirectory'] })
+    return res.canceled ? null : res.filePaths[0]
+  })
+  ipcMain.handle('shell:notices', async () => {
+    const packaged = join(process.resourcesPath ?? '', 'THIRD_PARTY_NOTICES.md')
+    await shell.openPath(existsSync(packaged) ? packaged : join(app.getAppPath(), 'resources', 'THIRD_PARTY_NOTICES.md'))
+  })
+  ipcMain.handle('setup:demo', (_e, parent: string) => installDemoVault(parent, getLang()))
   ipcMain.handle('mode:get', async () => modeOf((await readJson<Config>(configPath(), {})).mode))
   ipcMain.handle('mode:set', async (_e, m: AppMode) => {
     const mode = modeOf(m)
@@ -136,7 +180,7 @@ function registerIpc(): void {
   ipcMain.handle('vaults:last', async () => (await readJson<Config>(configPath(), {})).lastVault ?? null)
   ipcMain.handle('vaults:choose', async () => {
     const res = await dialog.showOpenDialog(mainWindow!, {
-      title: 'Scegli la cartella del vault',
+      title: t('Scegli la cartella del vault'),
       properties: ['openDirectory']
     })
     return res.canceled ? null : res.filePaths[0]
@@ -149,7 +193,7 @@ function registerIpc(): void {
     return graph
   })
   ipcMain.handle('note:read', async (_e, id: string) => {
-    if (!currentVault) throw new Error('Nessun vault aperto')
+    if (!currentVault) throw new Error(t('Nessun vault aperto'))
     const abs = safeVaultPath(currentVault, id)
     const [src, stat] = await Promise.all([fs.readFile(abs, 'utf8'), fs.stat(abs)])
     const { frontmatter, body } = splitFrontmatter(src)
@@ -276,8 +320,9 @@ function runCaptureSteps(win: BrowserWindow): void {
   })
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setName('Second Brain')
+  setLang(await getConfiguredLang())
   registerIpc()
   registerVaultProtocol()
   createWindow()

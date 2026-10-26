@@ -2,13 +2,13 @@
 
 **Explore your Obsidian vault as a 3D neural network — and talk to it with a local AI agent.**
 
-Second Brain is a desktop app that turns a folder of Markdown notes into an interactive 3D graph: every note is a neuron, every `[[wikilink]]` is a synapse. A built-in agent powered by a model running **on your own machine** (via [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai)) can search, read, connect and edit your notes. Everything works offline: the app reads your vault from disk and only talks to servers on `localhost`.
+Second Brain is a desktop app that turns a folder of Markdown notes into an interactive 3D graph: every note is a neuron, every `[[wikilink]]` is a synapse. An agent powered by a model running **on your own machine** — built into the app, or through [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai) — can search, read, connect and edit your notes. Your notes never leave the computer: the app reads the vault from disk, and the only download is the model, once, when you ask for it.
 
-> **Note:** the app interface is currently in Italian. Translations are on the [roadmap](roadmap.md).
+The interface is in English and Italian (Settings → Theme → Language).
 
 ## Download
 
-Grab the latest build from the [**Releases page**](../../releases/latest):
+Grab the latest build from the [**website**](https://www.romeo-francesco.it/secondbrain) or the [**Releases page**](https://github.com/romeofrancesc0/second-brain/releases/latest):
 
 | Platform | File |
 | --- | --- |
@@ -18,7 +18,7 @@ Grab the latest build from the [**Releases page**](../../releases/latest):
 
 ### macOS: first launch
 
-The app is not yet signed with an Apple Developer ID, so macOS will refuse to open it the first time. After dragging it into **Applications**, either right-click the app → **Open** → **Open**, or run:
+The app is not yet signed with an Apple Developer ID, so macOS will refuse to open it the first time. After dragging it into **Applications**, open it once, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to Second Brain (on macOS 14 and earlier, right-click the app → **Open** → **Open** also works). Or run:
 
 ```bash
 xattr -cr "/Applications/Second Brain.app"
@@ -28,6 +28,16 @@ xattr -cr "/Applications/Second Brain.app"
 
 The installer is not code-signed, so SmartScreen may warn you. Click **More info** → **Run anyway**.
 
+### First launch: setup
+
+The installer stays small (a couple of hundred MB at most): the AI model is not inside it. The first time you open the app, a short setup asks:
+
+1. **Language** — English or Italiano.
+2. **Local agent** — whether to download it, and which model: **Qwen 3.5 4B** (3.4 GB, fine with 8–16 GB of memory), **Qwen 3.5 9B** (6.6 GB, best with 24 GB or more), or both. The recommended one for your computer is preselected. The download runs in the background while you use the app; you can pause and resume it.
+3. **Demo vault** — a small ready-made vault of about twenty linked notes (brain, AI, study methods) in a folder you choose, to try everything without preparing anything.
+
+You can skip both downloads and do them later from the agent panel.
+
 ## Features
 
 - **3D graph of your vault** — one neuron per note, sized by number of connections; one colour and region per course/area.
@@ -36,7 +46,7 @@ The installer is not code-signed, so SmartScreen may warn you. Click **More info
   - **Minimal** — the same network with plain points and lines, light, dark or system tone;
   - **Hologram** — a holographic 3D brain that contains the network; as you fly closer the shell fades out and the neurons appear.
 - **Reading panel** with Markdown, LaTeX, callouts, images, outgoing links and backlinks.
-- **Local AI agent** with streaming chat, read and write tools, diffs you approve, automatic backups and undo.
+- **Local AI agent** with streaming chat, read and write tools, diffs you approve, automatic backups and undo. It runs a built-in model (no installation) or one from Ollama / LM Studio, and can look at the images in your notes.
 - **Semantic search** (optional) with a local embedding model.
 - **MCP server** exposing the same tools to LM Studio, Claude Desktop and any other MCP client.
 - **Live updates** — the graph follows the vault when files change on disk.
@@ -69,11 +79,13 @@ On first launch the app offers the vaults Obsidian already knows about, or any f
 
 ## Local AI agent
 
-The agent uses a model running on your computer through **Ollama** (recommended) or **LM Studio**. It searches and reads notes, reasons about links and, when you ask, creates or edits notes. Every change is shown as a diff and needs your approval.
+The agent uses a model running on your computer. It searches and reads notes, reasons about links and, when you ask, creates or edits notes. Every change is shown as a diff and needs your approval.
 
 ### 1. Set up a model
 
-Install [Ollama](https://ollama.com), then pull a model that supports **tool calling**:
+**Built-in (recommended).** Pick a model in the first-run setup, or open the agent (`⌘J` / `Ctrl+J`) and press **Download the recommended model**. The app runs it with [llama.cpp](https://github.com/ggml-org/llama.cpp): no other software needed.
+
+**Ollama or LM Studio (advanced).** If you already use them, install [Ollama](https://ollama.com) and pull a model that supports **tool calling**:
 
 ```bash
 ollama pull qwen3:8b
@@ -90,9 +102,9 @@ ollama pull nomic-embed-text
 ### 2. Connect the app
 
 1. Open the app and press **Agent** (`⌘J` / `Ctrl+J`).
-2. If Ollama is running, the app finds it and picks the first chat model. The dot next to the model name turns green when everything is ready.
+2. With the built-in model, the dot next to the model name turns green as soon as the download is finished. With Ollama running, the app finds it and picks the first chat model.
 3. From the settings icon in the panel you can change:
-   - the server: Ollama `http://localhost:11434`, or LM Studio `http://localhost:1234/v1` with its local server started;
+   - the server: built-in (with the list of models to download), Ollama `http://localhost:11434`, or LM Studio `http://localhost:1234/v1` with its local server started;
    - the model and context length (16k is a good compromise);
    - temperature and extended reasoning (more accurate, slower);
    - whether the camera follows the agent in the 3D view;
@@ -181,12 +193,14 @@ npm run dev          # development with hot reload
 
 ```
 src/main/            Electron main process: window, IPC, vault parsing, file watcher
-src/main/agent/      agent: Ollama/OpenAI client, tools, knowledge base, embeddings, prompt
+src/main/agent/      agent: built-in llama.cpp server, Ollama/OpenAI client, model downloads, tools, knowledge base, embeddings, prompt
 src/main/agentIpc.ts connects the agent to the UI (chat, approvals, index, MCP)
 src/mcp/server.ts    stdio MCP server (built to out/main/mcp.js)
 src/server/          always-on service with a Telegram bot (no UI)
 src/preload/         API exposed to the UI (window.api)
-src/shared/          shared types
+src/shared/          shared types; i18n.ts and en/ hold the English translations (the source strings are Italian)
+resources/demo-vault the demo vault (it/ and en/), copied where the user chooses in the first-run setup
+resources/llama      llama.cpp binaries, fetched by scripts/fetch-llama.cjs (not committed)
 src/renderer/        UI
   graph/             Three.js scene, shaders, force layout (Web Worker), labels
   ui/                note panel, agent chat, search, legend, settings
@@ -195,7 +209,8 @@ setup/               optional: run the model on a home PC and use it from your l
 
 ## Development and testing
 
-- `SBV_USER_DATA=/some/folder` uses a separate data folder (config, cache, backups): handy for trying the agent on a **copy** of your vault.
+- `SBV_USER_DATA=/some/folder` uses a separate data folder (config, cache, backups): handy for trying the agent on a **copy** of your vault. With an empty folder the app starts with the first-run setup.
+- To translate a string, wrap the Italian text in `t()` from `@shared/i18n` and add its English version to the matching file in `src/shared/en/`; a string without an English entry shows in Italian.
 - `SBV_CAPTURE_STEPS` runs scripted steps in the UI and saves screenshots, then quits:
 
 ```bash

@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { MODES, type AppMode } from '@shared/types'
 import { icons } from './icons'
 
@@ -40,7 +41,7 @@ export class ModeMenu {
     const m = MODES.find((x) => x.id === mode)!
     this.button.innerHTML = `${ICON[mode]}<span>${m.label}</span>`
     this.button.classList.toggle('eco', mode === 'eco')
-    this.button.title = [`Modalità ${m.label}: ${m.summary}`, ...m.limits.map((l) => `• ${l}`)].join('\n')
+    this.button.title = [`${t('Modalità {name}', { name: m.label })}: ${m.summary}`, ...m.limits.map((l) => `• ${l}`)].join('\n')
     if (this.isOpen) this.paint()
   }
 
@@ -65,7 +66,7 @@ export class ModeMenu {
 
   private paint(): void {
     this.menu.innerHTML = `
-      <div class="mode-title">Modalità</div>
+      <div class="mode-title">${t('Modalità')}</div>
       ${MODES.map(
         (m) => `<button class="mode-item ${m.id === this.mode ? 'on' : ''}" data-mode="${m.id}" aria-pressed="${m.id === this.mode}">
           <span class="mode-ic">${ICON[m.id]}</span>
