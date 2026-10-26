@@ -8,7 +8,7 @@ The interface is in English and Italian (Settings → Theme → Language).
 
 ## Download
 
-Grab the latest build from the [**website**](https://www.romeo-francesco.it/secondbrain) or the [**downloads page**](https://github.com/romeofrancesc0/second-brain-releases/releases/latest):
+Grab the latest build from the [**website**](https://www.romeo-francesco.it/secondbrain) or the [**Releases page**](https://github.com/romeofrancesc0/second-brain/releases/latest):
 
 | Platform | File |
 | --- | --- |
